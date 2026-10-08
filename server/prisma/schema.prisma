@@ -94,6 +94,7 @@ model StudentProfile {
   rollNo           Int?
   enrollmentNo     String?          @unique
   mobileNumber     String?
+  gender           String?          // e.g. "Male", "Female", "Other"
   enrollmentStatus EnrollmentStatus @default(ACTIVE)
 
   departmentId   Int?

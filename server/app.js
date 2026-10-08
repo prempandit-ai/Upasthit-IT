@@ -72,6 +72,7 @@ app.use("/api/hod",         hodRoutes);
 app.use("/api/coordinator", coordinatorRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/students",    studentRoutes);
+app.use("/api/student",     studentRoutes);
 app.use("/api/faculty",     facultyRoutes);
 app.use("/api/subjects",    subjectRoutes);
 app.use("/api/import",      importRoutes);

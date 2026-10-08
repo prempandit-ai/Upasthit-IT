@@ -8,7 +8,9 @@ export type AuthUser = {
   name: string;
   email: string;
   role: 'STUDENT' | 'FACULTY' | 'HOD' | 'COORDINATOR' | 'ADMIN';
+  status?: string;
   isActive: boolean;
+  profile?: any;
   createdAt?: string;
 };
 

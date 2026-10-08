@@ -16,6 +16,7 @@ import StatusBadge from '@/components/student/StatusBadge';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
+import { useAuth } from '@/hooks/use-auth';
 import {
   Assignment,
   AttendanceSummary,
@@ -31,6 +32,7 @@ type MainTab = 'attendance' | 'assignments' | 'projects' | 'study_plan';
 type AssignmentFilter = 'ALL' | 'Pending' | 'Submitted' | 'Evaluated' | 'Overdue';
 
 export default function AcademicsScreen() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<MainTab>('attendance');
   const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>('ALL');
 
@@ -101,7 +103,10 @@ export default function AcademicsScreen() {
             <ThemedText style={styles.headerTitle}>Curriculum & Progress</ThemedText>
           </View>
           <View style={styles.semesterBadge}>
-            <ThemedText style={styles.semesterText}>Sem 3 (2026-27)</ThemedText>
+            <ThemedText style={styles.semesterText}>
+              {user?.profile?.semester ? `Sem ${user.profile.semester}` : 'Sem 6'}{' '}
+              ({user?.profile?.academicYear ?? '2025-26'})
+            </ThemedText>
           </View>
         </View>
 

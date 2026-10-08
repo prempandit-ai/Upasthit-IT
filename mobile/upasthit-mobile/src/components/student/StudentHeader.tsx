@@ -34,8 +34,12 @@ export default function StudentHeader({
         <ThemedText style={styles.greeting}>Welcome back,</ThemedText>
         <ThemedText style={styles.name}>{user?.name || 'Student'}</ThemedText>
         <View style={styles.metaRow}>
-          <ThemedText style={styles.metaBadge}>B.Tech CSE</ThemedText>
-          <ThemedText style={styles.metaText}>Semester 3 • Sec B</ThemedText>
+          <ThemedText style={styles.metaBadge}>
+            {user?.profile?.departmentName || user?.profile?.departmentCode || 'B.Tech IT'}
+          </ThemedText>
+          <ThemedText style={styles.metaText}>
+            {user?.profile?.year ? `${user.profile.year} ` : ''}Semester {user?.profile?.semester ?? 6}{user?.profile?.division ? ` • Div ${user.profile.division}` : ''}
+          </ThemedText>
         </View>
       </View>
 

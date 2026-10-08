@@ -10,6 +10,12 @@ const router = express.Router();
 
 router.use(authenticate, requireApproved);
 
+// ─── Student Self-Service (Authenticated Student Only) ─────────────────────────
+router.get("/profile", authorize("STUDENT"), studentController.getMyProfile);
+router.get("/subjects", authorize("STUDENT"), studentController.getMySubjects);
+router.get("/dashboard", authorize("STUDENT"), studentController.getMyDashboard);
+router.get("/attendance", authorize("STUDENT"), studentController.getMyAttendance);
+
 // List students — Coordinator, HOD, Admin, Faculty
 router.get(
   "/",

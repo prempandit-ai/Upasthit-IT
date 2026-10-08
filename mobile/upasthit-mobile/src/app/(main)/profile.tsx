@@ -219,7 +219,8 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.programBadge}>
                   <ThemedText style={styles.programText}>
-                    {profile?.program ?? 'B.Tech'} • {profile?.branch ?? 'CSE'}
+                    {profile?.program ?? 'B.Tech'} •{' '}
+                    {profile?.departmentName || profile?.departmentCode || profile?.branch || 'IT'}
                   </ThemedText>
                 </View>
               </View>
@@ -231,15 +232,33 @@ export default function ProfileScreen() {
             {activeTab === 'PROFILE' && (
               <>
                 <Section title="Academic Information">
+                  <InfoRow icon="id-card-outline" label="Student ID / GR No" value={profile?.studentId} />
+                  <InfoRow icon="document-text-outline" label="Enrollment No" value={profile?.enrollmentNo} />
                   <InfoRow icon="card-outline" label="Roll No" value={profile?.rollNo} />
-                  <InfoRow icon="document-outline" label="University Roll No" value={profile?.universityRollNo} />
                   <InfoRow icon="school-outline" label="Program" value={profile?.program} />
-                  <InfoRow icon="git-branch-outline" label="Branch" value={profile?.branch} />
-                  <InfoRow icon="layers-outline" label="Semester" value={`Semester ${profile?.semester ?? 3}`} />
-                  <InfoRow icon="people-outline" label="Section" value={profile?.section} />
+                  <InfoRow
+                    icon="business-outline"
+                    label="Department"
+                    value={
+                      profile?.departmentName
+                        ? `${profile.departmentName} (${profile.departmentCode || ''})`
+                        : profile?.branch
+                    }
+                  />
+                  <InfoRow icon="calendar-outline" label="Academic Year" value={profile?.academicYear || profile?.admissionYear} />
+                  <InfoRow
+                    icon="layers-outline"
+                    label="Year & Semester"
+                    value={
+                      profile?.year
+                        ? `${profile.year} • Semester ${profile.semester ?? 6}`
+                        : `Semester ${profile?.semester ?? 6}`
+                    }
+                  />
+                  <InfoRow icon="people-outline" label="Division" value={profile?.division || profile?.section} />
                   <InfoRow icon="trophy-outline" label="CGPA" value={profile?.cgpa} />
-                  <InfoRow icon="calendar-outline" label="Admission Year" value={profile?.admissionYear} />
-                  <InfoRow icon="checkmark-circle-outline" label="Academic Status" value={profile?.academicStatus} last />
+                  <InfoRow icon="checkmark-circle-outline" label="Enrollment Status" value={profile?.enrollmentStatus || profile?.academicStatus} />
+                  <InfoRow icon="shield-checkmark-outline" label="Approval Status" value={profile?.approvalStatus || user?.status || 'APPROVED'} last />
                 </Section>
 
                 <Section title="Personal Information">
