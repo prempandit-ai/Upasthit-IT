@@ -18,20 +18,24 @@ const FacultyProfileCard = () => {
           {initial}
         </div>
         <p className="mt-3 text-base font-bold text-slate-900">Prof. {user?.name ?? '—'}</p>
-        {user?.department && (
-          <p className="mt-0.5 text-xs text-slate-500">{user.department}</p>
+        {(user?.department || user?.profile?.departmentName) && (
+          <p className="mt-0.5 text-xs text-slate-500">
+            {user?.department || user?.profile?.departmentName}
+          </p>
         )}
-        {user?.designation && (
-          <p className="mt-0.5 text-xs font-medium text-blue-700">{user.designation}</p>
+        {(user?.designation || user?.profile?.designation) && (
+          <p className="mt-0.5 text-xs font-medium text-blue-700">
+            {user?.designation || user?.profile?.designation}
+          </p>
         )}
       </div>
 
       {/* Details */}
       <div className="mt-4 space-y-2">
-        {user?.employeeId && (
+        {(user?.employeeId || user?.profile?.employeeId) && (
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <IdentificationIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            <span>ID: {user.employeeId}</span>
+            <span>ID: {user?.employeeId || user?.profile?.employeeId}</span>
           </div>
         )}
         <div className="flex items-center gap-2 text-xs text-slate-500">

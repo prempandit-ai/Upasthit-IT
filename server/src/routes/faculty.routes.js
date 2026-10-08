@@ -10,13 +10,21 @@ const router = express.Router();
 
 router.use(authenticate, requireApproved);
 
+// ─── Faculty Self-Service Endpoints ───────────────────────────────────────────
+router.get("/me", authorize("FACULTY"), facultyController.getMyProfile);
+router.get("/dashboard", authorize("FACULTY"), facultyController.getMyDashboard);
+router.get("/today-classes", authorize("FACULTY"), facultyController.getMyTodayClasses);
+router.get("/schedule/today", authorize("FACULTY"), facultyController.getMyTodaySchedule);
+router.get("/notifications", authorize("FACULTY"), facultyController.getMyNotifications);
+router.get("/attendance/summary", authorize("FACULTY"), facultyController.getMyAttendanceSummary);
+
 // List all faculty — Admin, HOD, Coordinator
 router.get("/", authorize("ADMIN", "HOD", "COORDINATOR"), facultyController.listFaculty);
 
-// Get one faculty member
-router.get("/:id", authorize("ADMIN", "HOD", "COORDINATOR"), facultyController.getFaculty);
+// Get one faculty member (FACULTY allowed with self-profile check)
+router.get("/:id", authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"), facultyController.getFaculty);
 
-// Get assigned subjects for a faculty
+// Get assigned subjects for a faculty (FACULTY allowed with self-check)
 router.get(
   "/:id/subjects",
   authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"),

@@ -4,7 +4,7 @@ const WelcomeHeader = () => {
   const { user } = useAuth();
 
   const name = user?.name ?? 'Faculty';
-  const dept = user?.department ?? null;
+  const dept = user?.department ?? user?.profile?.departmentName ?? null;
 
   // Format time greeting
   const hour = new Date().getHours();
