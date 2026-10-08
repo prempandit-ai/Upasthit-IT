@@ -6,6 +6,8 @@ datasource db {
   provider = "postgresql"
 }
 
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
 enum Role {
   ADMIN
   STUDENT
@@ -20,6 +22,28 @@ enum AccountStatus {
   REJECTED
 }
 
+enum SubjectType {
+  THEORY
+  PRACTICAL
+  ELECTIVE
+  AUDIT
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  DROPPED
+  COMPLETED
+}
+
+enum Year {
+  FY
+  SY
+  TY
+  BE
+}
+
+// ─── Core Auth Table (UNCHANGED) ─────────────────────────────────────────────
+
 model User {
   id        String        @id @default(cuid())
   name      String
@@ -30,4 +54,221 @@ model User {
   isActive  Boolean       @default(true)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+
+  // Profile relations (1:1 per role)
+  studentProfile     StudentProfile?
+  facultyProfile     FacultyProfile?
+  hodProfile         HODProfile?
+  coordinatorProfile CoordinatorProfile?
+  adminProfile       AdminProfile?
+
+  // Approval audit
+  approvalsMade     ApprovalLog[] @relation("ReviewerApprovals")
+  approvalsReceived ApprovalLog[] @relation("TargetApprovals")
+}
+
+// ─── Department (Reference Table) ─────────────────────────────────────────────
+
+model Department {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique // e.g. "CE", "IT", "ME"
+  name      String           // e.g. "Computer Engineering"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students     StudentProfile[]
+  faculty      FacultyProfile[]
+  hods         HODProfile[]
+  coordinators CoordinatorProfile[]
+  subjects     Subject[]
+}
+
+// ─── Student Profile ──────────────────────────────────────────────────────────
+
+model StudentProfile {
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  studentId        String           @unique // GR Number
+  rollNo           Int?
+  enrollmentNo     String?          @unique
+  mobileNumber     String?
+  enrollmentStatus EnrollmentStatus @default(ACTIVE)
+
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentCode String // kept for backward compat / Excel import
+  departmentName String
+
+  academicYear String  // e.g. "2025-26"
+  semester     Int     // 1–8
+  division     String? // A, B, C
+  year         Year    // FY, SY, TY, BE
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subjectEnrollments StudentSubjectEnrollment[]
+
+  @@index([departmentId])
+  @@index([academicYear, semester])
+  @@index([year, division])
+}
+
+// ─── Faculty Profile ──────────────────────────────────────────────────────────
+
+model FacultyProfile {
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  employeeId   String  @unique
+  mobileNumber String?
+  designation  String?
+
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentName String // kept for backward compat / Excel import
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subjectAssignments FacultySubjectAssignment[]
+
+  @@index([departmentId])
+}
+
+// ─── HOD Profile ──────────────────────────────────────────────────────────────
+
+model HODProfile {
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  employeeId String @unique
+
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentName String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Coordinator Profile ──────────────────────────────────────────────────────
+
+model CoordinatorProfile {
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  employeeId String @unique
+
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentName String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Admin Profile ────────────────────────────────────────────────────────────
+
+model AdminProfile {
+  id     Int    @id @default(autoincrement())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  employeeId String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Subject ──────────────────────────────────────────────────────────────────
+
+model Subject {
+  id          Int         @id @default(autoincrement())
+  subjectCode String      @unique
+  subjectName String
+  subjectType SubjectType @default(THEORY)
+  credits     Int?
+
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  departmentCode String // backward compat
+
+  academicYear String // e.g. "2025-26"
+  semester     Int
+  year         Year  // FY, SY, TY, BE
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  facultyAssignments FacultySubjectAssignment[]
+  studentEnrollments StudentSubjectEnrollment[]
+
+  @@index([departmentId, semester, academicYear])
+}
+
+// ─── Faculty–Subject Assignment ───────────────────────────────────────────────
+
+model FacultySubjectAssignment {
+  id Int @id @default(autoincrement())
+
+  facultyId Int
+  faculty   FacultyProfile @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  subjectId Int
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  academicYear String
+  division     String? // A, B, C — null means all divisions
+
+  createdAt DateTime @default(now())
+
+  @@unique([facultyId, subjectId, academicYear, division])
+  @@index([facultyId])
+  @@index([subjectId])
+}
+
+// ─── Student–Subject Enrollment ───────────────────────────────────────────────
+
+model StudentSubjectEnrollment {
+  id Int @id @default(autoincrement())
+
+  studentId Int
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  subjectId Int
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  academicYear String
+  status       EnrollmentStatus @default(ACTIVE)
+  enrolledAt   DateTime         @default(now())
+
+  @@unique([studentId, subjectId, academicYear])
+  @@index([studentId])
+  @@index([subjectId])
+}
+
+// ─── Approval Log ─────────────────────────────────────────────────────────────
+
+model ApprovalLog {
+  id Int @id @default(autoincrement())
+
+  targetId String
+  target   User   @relation("TargetApprovals", fields: [targetId], references: [id])
+
+  reviewerId String?
+  reviewer   User?   @relation("ReviewerApprovals", fields: [reviewerId], references: [id])
+
+  action AccountStatus // APPROVED or REJECTED
+  note   String?       // optional rejection reason
+
+  createdAt DateTime @default(now())
+
+  @@index([targetId])
+  @@index([reviewerId])
 }

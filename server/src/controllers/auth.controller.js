@@ -54,6 +54,13 @@ exports.login = async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
+      include: {
+        studentProfile: { include: { department: true } },
+        facultyProfile: { include: { department: true } },
+        hodProfile: { include: { department: true } },
+        coordinatorProfile: { include: { department: true } },
+        adminProfile: true,
+      },
     });
 
     if (!user) {
@@ -113,6 +120,13 @@ exports.getMe = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
+      include: {
+        studentProfile: { include: { department: true } },
+        facultyProfile: { include: { department: true } },
+        hodProfile: { include: { department: true } },
+        coordinatorProfile: { include: { department: true } },
+        adminProfile: true,
+      },
     });
 
     if (!user) {
