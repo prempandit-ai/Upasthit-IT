@@ -1,5 +1,5 @@
 const prisma = require("../config/prisma");
-const { comparePassword } = require("../utils/hashPassword");
+const { comparePassword, hashPassword } = require("../utils/hashPassword");
 const { generateToken } = require("../utils/jwt");
 const userService = require("../services/user.service");
 const { sanitizeUser, buildTokenPayload } = require("../utils/userHelpers");
@@ -180,6 +180,80 @@ exports.getMe = async (req, res, next) => {
     return res.json({
       success: true,
       user: sanitizeUser(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from current password",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const isMatch = await comparePassword(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "Incorrect current password",
+      });
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        mustChangePassword: false,
+        tokenVersion: { increment: 1 },
+      },
+      include: {
+        studentProfile: { include: { department: true } },
+        facultyProfile: { include: { department: true } },
+        hodProfile: { include: { department: true } },
+        coordinatorProfile: { include: { department: true } },
+        adminProfile: true,
+      },
+    });
+
+    const token = generateToken(buildTokenPayload(updatedUser));
+
+    return res.json({
+      success: true,
+      message: "Password changed successfully",
+      token,
+      user: sanitizeUser(updatedUser),
     });
   } catch (error) {
     next(error);

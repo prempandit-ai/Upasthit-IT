@@ -2,12 +2,13 @@ import axios, { AxiosError } from 'axios';
 
 import { clearAuthStorage, getToken, isTokenExpired } from '@/utils/storage';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || '').trim();
+const API_URL = rawApiUrl.replace(/\s+/g, '').replace(/\/+$/, '');
 
 if (!API_URL) {
   throw new Error(
     'EXPO_PUBLIC_API_URL is not configured. ' +
-      'Add it to your .env file (e.g. EXPO_PUBLIC_API_URL=http://192.168.0.105:5000).'
+      'Add it to your .env file (e.g. EXPO_PUBLIC_API_URL=http://10.88.180.140:5000).'
   );
 }
 

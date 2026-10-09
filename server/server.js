@@ -14,8 +14,23 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+const os = require("os");
+
+function getLocalIp() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
 app.listen(PORT, '0.0.0.0', () => {
+  const networkIp = getLocalIp();
   console.log(`UPASTHIT server running on port ${PORT} (all interfaces)`);
   console.log(`  Local:   http://localhost:${PORT}`);
-  console.log(`  Network: http://192.168.0.106:${PORT}`);
+  console.log(`  Network: http://${networkIp}:${PORT}`);
 });

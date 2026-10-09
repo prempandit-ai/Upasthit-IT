@@ -43,6 +43,7 @@ enum Year {
 }
 
 enum AttendanceSessionStatus {
+  NOT_STARTED
   ACTIVE
   COMPLETED
 }
@@ -61,9 +62,11 @@ model User {
   password  String
   role      Role
   status    AccountStatus @default(PENDING)
-  isActive  Boolean       @default(true)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  isActive           Boolean       @default(true)
+  mustChangePassword Boolean       @default(false)
+  tokenVersion       Int           @default(0)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   // Profile relations (1:1 per role)
   studentProfile     StudentProfile?
@@ -290,20 +293,29 @@ model ApprovalLog {
 // ─── Attendance Session ───────────────────────────────────────────────────────
 
 model AttendanceSession {
-  id           Int                     @id @default(autoincrement())
-  assignmentId Int
-  academicYear String
-  year         Year
-  division     String
-  sessionDate  DateTime
-  status       AttendanceSessionStatus @default(ACTIVE)
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
+  id                    Int                     @id @default(autoincrement())
+  assignmentId          Int
+  academicYear          String
+  year                  Year
+  division              String
+  sessionDate           DateTime
+  status                AttendanceSessionStatus @default(NOT_STARTED)
+  attendanceType        String?
+  sessionType           String?
+  lectureTime           String?
+  startedAt             DateTime?
+  expiresAt             DateTime?
+  completedAt           DateTime?
+  windowDurationSeconds Int                     @default(300)
+  joinCode              String?                 @unique
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
 
   assignment FacultySubjectAssignment @relation(fields: [assignmentId], references: [id])
   records    AttendanceRecord[]
 
   @@index([assignmentId, sessionDate])
+  @@index([status, expiresAt])
 }
 
 // ─── Attendance Record ────────────────────────────────────────────────────────

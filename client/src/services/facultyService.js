@@ -22,21 +22,60 @@ export const exportSchedule = (params) => api.get('/api/faculty/schedule/export'
 // ── Notifications ─────────────────────────────────────────────────────────────
 export const getFacultyNotifications = () => api.get('/api/faculty/notifications');
 
+const ATTENDANCE_SESSION_STORAGE_KEY = 'upasthit.attendance.activeSessionId';
+
+export const getAttendanceErrorMessage = (error, fallback = 'Something went wrong. Please try again.') => {
+  if (!error) return fallback;
+  if (!error.response) return 'Backend unavailable. Please check your connection and try again.';
+  return error.response.data?.message || fallback;
+};
+
+export const getStoredAttendanceSessionId = () => {
+  try {
+    return window.localStorage.getItem(ATTENDANCE_SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+export const storeAttendanceSessionId = (sessionId) => {
+  try {
+    if (sessionId) window.localStorage.setItem(ATTENDANCE_SESSION_STORAGE_KEY, String(sessionId));
+    else window.localStorage.removeItem(ATTENDANCE_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures (private browsing, disabled storage).
+  }
+};
+
 // ── Attendance ────────────────────────────────────────────────────────────────
 export const getAttendanceSummary = () => api.get('/api/faculty/attendance/summary');
-/** GET /api/faculty/attendance/history?type&subject&batch&from&to&page&limit */
-export const getAttendanceHistory = (params) => api.get('/api/faculty/attendance/history', { params });
-/** POST /api/faculty/attendance/start — start attendance window */
-export const startAttendanceSession = (payload) => api.post('/api/faculty/attendance/start', payload);
-/** GET /api/faculty/attendance/session/:sessionId — get active session + student list */
-export const getAttendanceSession = (sessionId) => api.get(`/api/faculty/attendance/session/${sessionId}`);
-/** POST /api/faculty/attendance/session/:sessionId/submit */
+export const getFacultyAttendanceAssignments = () => api.get('/api/attendance/faculty/assignments');
+export const getEligibleAttendanceStudents = (params) =>
+  api.get('/api/attendance/eligible-students', { params });
+export const getAttendanceStudents = (params) =>
+  api.get('/api/attendance/students', { params });
+export const createAttendanceSession = (payload) => api.post('/api/attendance/sessions', payload);
+export const startAttendanceSessionById = (sessionId) =>
+  api.post(`/api/attendance/sessions/${sessionId}/start`);
+export const getActiveAttendanceSession = () => api.get('/api/attendance/sessions/active');
+export const getAttendanceHistory = (params) => api.get('/api/attendance/history', { params });
+export const getAttendanceSession = (sessionId) => api.get(`/api/attendance/sessions/${sessionId}`);
+export const getAttendanceSessionStudents = (sessionId) =>
+  api.get(`/api/attendance/sessions/${sessionId}/students`);
+export const getAttendanceSessionSummary = (sessionId) =>
+  api.get(`/api/attendance/sessions/${sessionId}/summary`);
 export const submitAttendance = (sessionId, payload) =>
-  api.post(`/api/faculty/attendance/session/${sessionId}/submit`, payload);
-/** GET /api/faculty/attendance/session/:sessionId/status */
-export const getSessionStatus = (sessionId) => api.get(`/api/faculty/attendance/session/${sessionId}/status`);
-/** GET /api/faculty/attendance/:id — attendance record detail */
-export const getAttendanceDetail = (id) => api.get(`/api/faculty/attendance/${id}`);
+  api.post(`/api/attendance/sessions/${sessionId}/records`, payload);
+export const completeAttendanceSession = (sessionId) =>
+  api.post(`/api/attendance/sessions/${sessionId}/complete`);
+export const getSessionStatus = (sessionId) => api.get(`/api/attendance/sessions/${sessionId}`);
+export const getAttendanceDetail = (id) => api.get(`/api/attendance/sessions/${id}`);
+export const startAttendanceSession = async (payload) => {
+  const created = await createAttendanceSession(payload);
+  const sessionId = created.data?.session?.id;
+  if (!sessionId) return created;
+  return startAttendanceSessionById(sessionId);
+};
 
 // ── Event attendance approval ─────────────────────────────────────────────────
 export const getEventAttendancePending = () => api.get('/api/faculty/attendance/event-approval?status=PENDING');

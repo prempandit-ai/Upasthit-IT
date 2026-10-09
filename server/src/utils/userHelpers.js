@@ -14,6 +14,7 @@ const sanitizeUser = (user) => {
     role: user.role,
     status: user.status,
     isActive: user.isActive,
+    mustChangePassword: Boolean(user.mustChangePassword),
     profile,
     createdAt: user.createdAt,
   };
@@ -56,6 +57,7 @@ const buildTokenPayload = (user) => ({
   email: user.email,
   role: user.role,
   status: user.status,
+  tokenVersion: user.tokenVersion ?? 0,
 });
 
 module.exports = {

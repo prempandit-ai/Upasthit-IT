@@ -22,6 +22,7 @@ router.post(
 );
 router.post("/register", registerRules, validate, authController.registerStudent);
 router.post("/login", loginRules, validate, authController.login);
+router.post("/change-password", authenticate, authController.changePassword);
 router.get("/me", authenticate, requireApproved, authController.getMe);
 
 router.get(
