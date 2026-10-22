@@ -109,6 +109,16 @@ model StudentProfile {
   mobileNumber     String?
   gender           String? // e.g. "Male", "Female", "Other"
   enrollmentStatus EnrollmentStatus @default(ACTIVE)
+  program          String? // e.g. "B.Tech", "B.E."
+  dateOfBirth      DateTime?
+  bloodGroup       String?
+  nationality      String?
+  fatherName       String?
+  motherName       String?
+  address          String?
+  emergencyContactName         String?
+  emergencyContactRelationship String?
+  emergencyContactPhone        String?
 
   departmentId   Int?
   department     Department? @relation(fields: [departmentId], references: [id])

@@ -5,7 +5,33 @@ const { sanitizeUser } = require("../utils/userHelpers");
 // ─── List Pending Students ─────────────────────────────────────────────────────
 exports.listPendingStudents = async (req, res, next) => {
   try {
-    const users = await userService.listUsers({ role: "STUDENT", status: "PENDING" });
+    const users = await prisma.user.findMany({
+      where: { role: "STUDENT", status: "PENDING" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        isActive: true,
+        createdAt: true,
+        studentProfile: {
+          select: {
+            studentId: true,
+            rollNo: true,
+            program: true,
+            year: true,
+            semester: true,
+            division: true,
+            academicYear: true,
+            departmentCode: true,
+            departmentName: true,
+            mobileNumber: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
     return res.json({ success: true, users });
   } catch (error) {
     next(error);

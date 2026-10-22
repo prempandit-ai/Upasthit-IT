@@ -7,6 +7,9 @@ export const loginRequest = (credentials) =>
 export const getMeRequest = () => api.get("/api/auth/me");
 
 // ── Self-registration (public, status: PENDING) ───────────────────────────────
+export const getRegistrationOptionsRequest = () =>
+  api.get("/api/auth/registration-options");
+
 export const registerStudentRequest = (payload) =>
   api.post("/api/auth/register-student", payload);
 

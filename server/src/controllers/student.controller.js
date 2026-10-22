@@ -286,22 +286,39 @@ exports.getMyProfile = async (req, res, next) => {
   try {
     const profile = await prisma.studentProfile.findUnique({
       where: { userId: req.user.id },
-      include: {
-        department: true,
-        user: { select: { id: true, name: true, email: true, status: true, isActive: true, role: true } },
-        subjectEnrollments: {
-          include: {
-            subject: {
-              include: {
-                facultyAssignments: {
-                  include: {
-                    faculty: {
-                      include: { user: { select: { name: true, email: true } } },
-                    },
-                  },
-                },
-              },
-            },
+      select: {
+        id: true,
+        studentId: true,
+        rollNo: true,
+        enrollmentNo: true,
+        mobileNumber: true,
+        gender: true,
+        enrollmentStatus: true,
+        program: true,
+        dateOfBirth: true,
+        bloodGroup: true,
+        nationality: true,
+        fatherName: true,
+        motherName: true,
+        address: true,
+        emergencyContactName: true,
+        emergencyContactRelationship: true,
+        emergencyContactPhone: true,
+        departmentCode: true,
+        departmentName: true,
+        academicYear: true,
+        semester: true,
+        division: true,
+        year: true,
+        department: { select: { code: true, name: true } },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            status: true,
+            isActive: true,
+            role: true,
           },
         },
       },
@@ -311,7 +328,57 @@ exports.getMyProfile = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Student profile not found" });
     }
 
-    return res.json({ success: true, profile });
+    const user = profile.user;
+    const departmentName = profile.department?.name || profile.departmentName || null;
+    const departmentCode = profile.department?.code || profile.departmentCode || null;
+
+    return res.json({
+      success: true,
+      profile: {
+        id: profile.id,
+        studentId: profile.studentId,
+        rollNo: profile.rollNo,
+        enrollmentNo: profile.enrollmentNo,
+        mobileNumber: profile.mobileNumber,
+        gender: profile.gender,
+        enrollmentStatus: profile.enrollmentStatus,
+        program: profile.program,
+        dateOfBirth: profile.dateOfBirth,
+        dob: profile.dateOfBirth,
+        bloodGroup: profile.bloodGroup,
+        nationality: profile.nationality,
+        fatherName: profile.fatherName,
+        motherName: profile.motherName,
+        address: profile.address,
+        emergencyContactName: profile.emergencyContactName,
+        emergencyContactRelationship: profile.emergencyContactRelationship,
+        emergencyContactPhone: profile.emergencyContactPhone,
+        emergencyContact: {
+          name: profile.emergencyContactName,
+          relationship: profile.emergencyContactRelationship,
+          phone: profile.emergencyContactPhone,
+        },
+        departmentCode,
+        departmentName,
+        academicYear: profile.academicYear,
+        semester: profile.semester,
+        division: profile.division,
+        year: profile.year,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        approvalStatus: user.status,
+        isActive: user.isActive,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          isActive: user.isActive,
+          role: user.role,
+        },
+      },
+    });
   } catch (error) {
     next(error);
   }

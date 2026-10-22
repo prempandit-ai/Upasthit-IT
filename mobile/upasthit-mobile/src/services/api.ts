@@ -51,6 +51,11 @@ export function classifyApiError(error: unknown): string {
   if (status === 401) {
     return serverMessage ?? 'Invalid email or password.';
   }
+  if (status === 422) {
+    const firstFieldError = (axiosError.response.data as { errors?: { message?: string }[] })
+      ?.errors?.[0]?.message;
+    return firstFieldError || serverMessage || 'Validation failed.';
+  }
   if (status === 404) {
     return 'API endpoint not found. The server may be misconfigured.';
   }

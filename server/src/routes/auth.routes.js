@@ -4,13 +4,15 @@ const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const requireApproved = require("../middleware/approval.middleware");
 const validate = require("../middleware/validate.middleware");
-const { registerRules, loginRules } = require("../validators/auth.validator");
+const { registerRules, studentRegisterRules, loginRules } = require("../validators/auth.validator");
 
 const router = express.Router();
 
+router.get("/registration-options", authController.getRegistrationOptions);
+
 router.post(
   "/register-student",
-  registerRules,
+  studentRegisterRules,
   validate,
   authController.registerStudent
 );
@@ -20,7 +22,7 @@ router.post(
   validate,
   authController.registerFaculty
 );
-router.post("/register", registerRules, validate, authController.registerStudent);
+router.post("/register", studentRegisterRules, validate, authController.registerStudent);
 router.post("/login", loginRules, validate, authController.login);
 router.post("/change-password", authenticate, authController.changePassword);
 router.get("/me", authenticate, requireApproved, authController.getMe);

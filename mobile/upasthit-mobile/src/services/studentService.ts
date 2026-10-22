@@ -14,6 +14,7 @@ export interface StudentProfile {
   id: string;
   name: string;
   email: string;
+  role?: string;
   rollNo?: string;
   studentId?: string;
   enrollmentNo?: string;
@@ -39,6 +40,7 @@ export interface StudentProfile {
   fatherName?: string;
   motherName?: string;
   phone?: string;
+  mobileNumber?: string;
   address?: string;
   permanentAddress?: string;
   emergencyContact?: {
@@ -625,53 +627,68 @@ export const getStudentDashboard = async () => {
   }
 };
 
+function mapStudentProfile(p: any): StudentProfile {
+  const u = p.user || {};
+  const rollNo = p.rollNo === 0 || p.rollNo ? String(p.rollNo) : undefined;
+  const departmentCode = p.department?.code || p.departmentCode || undefined;
+  const departmentName = p.department?.name || p.departmentName || undefined;
+
+  return {
+    id: String(p.id ?? u.id ?? ''),
+    name: u.name || p.name || '',
+    email: u.email || p.email || '',
+    role: u.role || p.role || undefined,
+    rollNo,
+    studentId: p.studentId || undefined,
+    enrollmentNo: p.enrollmentNo || undefined,
+    universityRollNo: p.enrollmentNo || p.studentId || undefined,
+    departmentCode,
+    departmentName,
+    branch: departmentName || departmentCode,
+    semester: p.semester ?? undefined,
+    division: p.division || undefined,
+    year: p.year || undefined,
+    academicYear: p.academicYear || undefined,
+    admissionYear: p.academicYear || undefined,
+    academicStatus: p.enrollmentStatus || undefined,
+    enrollmentStatus: p.enrollmentStatus || undefined,
+    approvalStatus: u.status || p.approvalStatus || undefined,
+    program: p.program || undefined,
+    dob: p.dob || p.dateOfBirth || undefined,
+    gender: p.gender || undefined,
+    bloodGroup: p.bloodGroup || undefined,
+    nationality: p.nationality || undefined,
+    fatherName: p.fatherName || undefined,
+    motherName: p.motherName || undefined,
+    phone: p.mobileNumber || p.phone || undefined,
+    mobileNumber: p.mobileNumber || p.phone || undefined,
+    address: p.address || undefined,
+    emergencyContact:
+      p.emergencyContact?.name ||
+      p.emergencyContact?.relationship ||
+      p.emergencyContact?.phone ||
+      p.emergencyContactName ||
+      p.emergencyContactRelationship ||
+      p.emergencyContactPhone
+        ? {
+            name: p.emergencyContact?.name || p.emergencyContactName || '',
+            relationship:
+              p.emergencyContact?.relationship || p.emergencyContactRelationship || '',
+            phone: p.emergencyContact?.phone || p.emergencyContactPhone || '',
+          }
+        : undefined,
+  };
+}
+
 export const getStudentProfile = async (): Promise<{ data: StudentProfile }> => {
-  try {
-    const res = await api.get('/student/profile');
-    const p = res.data?.profile || res.data;
-    if (p && (p.studentId || p.rollNo || p.user)) {
-      const u = p.user || {};
-      return {
-        data: {
-          id: String(p.id || p.userId || ''),
-          name: u.name || FALLBACK_PROFILE.name,
-          email: u.email || FALLBACK_PROFILE.email,
-          rollNo: p.rollNo ? String(p.rollNo) : undefined,
-          studentId: p.studentId,
-          enrollmentNo: p.enrollmentNo,
-          universityRollNo: p.enrollmentNo || p.studentId,
-          program: 'B.Tech Engineering',
-          branch: p.departmentName || p.departmentCode || 'Information Technology',
-          departmentCode: p.departmentCode,
-          departmentName: p.departmentName,
-          semester: p.semester,
-          section: p.division ? `Division ${p.division}` : undefined,
-          division: p.division,
-          year: p.year,
-          cgpa: 8.64,
-          admissionYear: p.academicYear,
-          academicYear: p.academicYear,
-          academicStatus: p.enrollmentStatus || 'ACTIVE',
-          enrollmentStatus: p.enrollmentStatus || 'ACTIVE',
-          approvalStatus: u.status || 'APPROVED',
-          gender: p.gender || 'Male',
-          phone: p.mobileNumber || '+91 91234 56780',
-          subjectEnrollments: p.subjectEnrollments || [],
-          dob: FALLBACK_PROFILE.dob,
-          bloodGroup: FALLBACK_PROFILE.bloodGroup,
-          nationality: FALLBACK_PROFILE.nationality,
-          fatherName: FALLBACK_PROFILE.fatherName,
-          motherName: FALLBACK_PROFILE.motherName,
-          address: FALLBACK_PROFILE.address,
-          permanentAddress: FALLBACK_PROFILE.permanentAddress,
-          emergencyContact: FALLBACK_PROFILE.emergencyContact,
-        },
-      };
-    }
-    return { data: FALLBACK_PROFILE };
-  } catch (err) {
-    return { data: FALLBACK_PROFILE };
+  const res = await api.get('/student/profile');
+  const p = res.data?.profile;
+
+  if (!p) {
+    throw new Error('Student profile not found');
   }
+
+  return { data: mapStudentProfile(p) };
 };
 
 export const updateStudentProfile = (payload: Partial<StudentProfile>) =>
@@ -794,8 +811,22 @@ export const registerForEvent = (eventId: string) =>
 export const getStudentNotifications = () =>
   safeApiCall(() => api.get('/student/notifications'), { notifications: FALLBACK_NOTIFICATIONS });
 
-export const getStudentFees = () =>
-  safeApiCall(() => api.get('/student/fees'), FALLBACK_FEES);
+export const getStudentFees = async (): Promise<{ data: FeeSummary | null }> => {
+  try {
+    const res = await api.get('/student/fees');
+    const payload = res.data?.data ?? res.data?.fees ?? null;
+    return { data: payload && typeof payload === 'object' ? payload : null };
+  } catch {
+    return { data: null };
+  }
+};
 
-export const getStudentLibrary = () =>
-  safeApiCall(() => api.get('/student/library'), FALLBACK_LIBRARY);
+export const getStudentLibrary = async (): Promise<{ data: LibrarySummary | null }> => {
+  try {
+    const res = await api.get('/student/library');
+    const payload = res.data?.data ?? res.data?.library ?? null;
+    return { data: payload && typeof payload === 'object' ? payload : null };
+  } catch {
+    return { data: null };
+  }
+};

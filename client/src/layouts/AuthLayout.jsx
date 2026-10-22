@@ -85,7 +85,7 @@ const AuthLayout = () => {
       </div>
 
       {/* Right Column - Form Area */}
-      <div className="flex w-full lg:w-[480px] xl:w-[520px] shrink-0 flex-col justify-center bg-white px-6 py-10 sm:px-12 lg:px-14">
+      <div className="flex w-full lg:w-[480px] xl:w-[520px] shrink-0 flex-col justify-center bg-white px-6 py-10 sm:px-12 lg:px-14 overflow-y-auto">
         <div className="w-full max-w-sm mx-auto">
           <Outlet />
         </div>

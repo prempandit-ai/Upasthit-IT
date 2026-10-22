@@ -34,6 +34,12 @@ const PendingStudentsTable = ({ users, onApprove, onReject, actionLoading }) => 
               Email
             </th>
             <th className="pb-3 pr-6 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Department
+            </th>
+            <th className="pb-3 pr-6 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Academic
+            </th>
+            <th className="pb-3 pr-6 text-xs font-semibold uppercase tracking-wide text-slate-400">
               Registered
             </th>
             <th className="pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -46,6 +52,28 @@ const PendingStudentsTable = ({ users, onApprove, onReject, actionLoading }) => 
             <tr key={u.id} className="border-b border-slate-100 last:border-0">
               <td className="py-3 pr-6 font-medium text-slate-800">{u.name}</td>
               <td className="py-3 pr-6 text-slate-500">{u.email}</td>
+              <td className="py-3 pr-6 text-slate-500">
+                {u.studentProfile?.departmentName ||
+                  u.studentProfile?.departmentCode ||
+                  "—"}
+              </td>
+              <td className="py-3 pr-6 text-xs text-slate-500">
+                {[
+                  u.studentProfile?.program,
+                  u.studentProfile?.year,
+                  u.studentProfile?.semester
+                    ? `Sem ${u.studentProfile.semester}`
+                    : null,
+                  u.studentProfile?.division
+                    ? `Div ${u.studentProfile.division}`
+                    : null,
+                  u.studentProfile?.rollNo != null
+                    ? `Roll ${u.studentProfile.rollNo}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "—"}
+              </td>
               <td className="py-3 pr-6 text-xs text-slate-400">
                 {new Date(u.createdAt).toLocaleDateString()}
               </td>

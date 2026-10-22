@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { AxiosError } from 'axios';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,22 +13,70 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import StatusBadge from '@/components/student/StatusBadge';
+import EmptyState from '@/components/student/EmptyState';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
 import { useAuth } from '@/hooks/use-auth';
-import {
-  FeeSummary,
-  getStudentFees,
-  getStudentLibrary,
-  getStudentProfile,
-  LibrarySummary,
-  StudentProfile,
-} from '@/services/studentService';
+import { classifyApiError } from '@/services/api';
+import { getStudentProfile, StudentProfile } from '@/services/studentService';
 import { ROLE_LABELS } from '@/utils/roles';
+import { AuthUser } from '@/utils/storage';
 
 type ProfileTab = 'PROFILE' | 'DOCUMENTS' | 'FEES' | 'LIBRARY';
+
+const YEAR_LABELS: Record<string, string> = {
+  FY: 'FY (First Year)',
+  SY: 'SY (Second Year)',
+  TY: 'TY (Third Year)',
+  BE: 'BE (Final Year)',
+};
+
+function getInitials(name?: string | null) {
+  if (!name?.trim()) return 'NA';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function formatStatus(value?: string | number | null) {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value).replace(/_/g, ' ').toLowerCase();
+  return text.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatYearSemester(year?: string | null, semester?: number | string | null) {
+  const yearLabel = year ? YEAR_LABELS[year] || year : null;
+  const semesterLabel =
+    semester === 0 || semester ? `Semester ${semester}` : null;
+  if (yearLabel && semesterLabel) return `${yearLabel} • ${semesterLabel}`;
+  return yearLabel || semesterLabel;
+}
+
+function formatDisplayDate(value?: string | number | null) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function departmentDisplay(profile?: StudentProfile | null) {
+  if (!profile) return null;
+  if (profile.departmentName && profile.departmentCode) {
+    return `${profile.departmentName} (${profile.departmentCode})`;
+  }
+  return profile.departmentName || profile.departmentCode || null;
+}
+
+function isUnauthorized(error: unknown) {
+  return (error as AxiosError)?.response?.status === 401;
+}
 
 // ── Info row ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +91,7 @@ function InfoRow({
   value?: string | number | null;
   last?: boolean;
 }) {
-  if (!value && value !== 0) return null;
+  const missing = value === undefined || value === null || value === '';
   return (
     <>
       <View style={infoStyles.row}>
@@ -51,7 +100,9 @@ function InfoRow({
         </View>
         <View style={infoStyles.texts}>
           <ThemedText style={infoStyles.label}>{label}</ThemedText>
-          <ThemedText style={infoStyles.value}>{String(value)}</ThemedText>
+          <ThemedText style={[infoStyles.value, missing && infoStyles.missing]}>
+            {missing ? 'Not available' : String(value)}
+          </ThemedText>
         </View>
       </View>
       {!last && <View style={infoStyles.divider} />}
@@ -72,44 +123,48 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<ProfileTab>('PROFILE');
   const [profile, setProfile] = useState<StudentProfile | null>(null);
-  const [fees, setFees] = useState<FeeSummary | null>(null);
-  const [library, setLibrary] = useState<LibrarySummary | null>(null);
-
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
-    try {
-      const [profRes, feeRes, libRes] = await Promise.allSettled([
-        getStudentProfile(),
-        getStudentFees(),
-        getStudentLibrary(),
-      ]);
+  const expireSession = useCallback(async () => {
+    await logout();
+    router.replace('/login');
+  }, [logout]);
 
-      if (profRes.status === 'fulfilled') {
-        setProfile(profRes.value.data);
+  const fetchData = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
       }
-      if (feeRes.status === 'fulfilled') {
-        setFees(feeRes.value.data);
+      setError(null);
+
+      try {
+        const { data } = await getStudentProfile();
+        setProfile(data);
+      } catch (err) {
+        if (isUnauthorized(err)) {
+          await expireSession();
+          return;
+        }
+        setProfile(null);
+        setError(classifyApiError(err));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      if (libRes.status === 'fulfilled') {
-        setLibrary(libRes.value.data);
-      }
-    } catch (_) {
-      // safe fallback
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+    },
+    [expireSession]
+  );
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const onRefresh = () => {
-    setRefreshing(true);
-    fetchData();
+    fetchData(true);
   };
 
   const handleLogout = () => {
@@ -126,17 +181,13 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const displayName = profile?.name ?? user?.name ?? 'Student';
-  const displayEmail = profile?.email ?? user?.email ?? '';
-  const initial = displayName.charAt(0).toUpperCase();
-
-  const documents = [
-    { id: 'doc_1', name: 'Class 10th Secondary Certificate', issue: 'CBSE Board', verified: true, date: '2021' },
-    { id: 'doc_2', name: 'Class 12th Senior Secondary Marksheet', issue: 'CBSE Board', verified: true, date: '2023' },
-    { id: 'doc_3', name: 'JEE Entrance Examination Rank Card', issue: 'NTA Official', verified: true, date: '2023' },
-    { id: 'doc_4', name: 'College Admission Allotment Letter', issue: 'Registrar Office', verified: true, date: '2023' },
-    { id: 'doc_5', name: 'Aadhar Identity Verification Card', issue: 'UIDAI Govt of India', verified: true, date: 'Verified' },
-  ];
+  const displayName = profile?.name || user?.name || 'Student';
+  const displayEmail = profile?.email || user?.email || 'Not available';
+  const initials = getInitials(displayName);
+  const roleKey = (profile?.role || user?.role || 'STUDENT') as AuthUser['role'];
+  const roleLabel = ROLE_LABELS[roleKey] || roleKey;
+  const programLabel = profile?.program || 'Not available';
+  const departmentLabel = departmentDisplay(profile) || 'Not available';
 
   return (
     <ThemedView style={styles.root}>
@@ -206,21 +257,18 @@ export default function ProfileScreen() {
             <View style={styles.hero}>
               <View style={styles.avatarRing}>
                 <View style={styles.avatar}>
-                  <ThemedText style={styles.avatarText}>{initial}</ThemedText>
+                  <ThemedText style={styles.avatarText}>{initials}</ThemedText>
                 </View>
               </View>
               <ThemedText style={styles.name}>{displayName}</ThemedText>
               <ThemedText style={styles.email}>{displayEmail}</ThemedText>
               <View style={styles.badgeRow}>
                 <View style={styles.roleBadge}>
-                  <ThemedText style={styles.roleText}>
-                    {ROLE_LABELS[user?.role ?? 'STUDENT']}
-                  </ThemedText>
+                  <ThemedText style={styles.roleText}>{roleLabel}</ThemedText>
                 </View>
                 <View style={styles.programBadge}>
                   <ThemedText style={styles.programText}>
-                    {profile?.program ?? 'B.Tech'} •{' '}
-                    {profile?.departmentName || profile?.departmentCode || profile?.branch || 'IT'}
+                    {programLabel} • {departmentLabel}
                   </ThemedText>
                 </View>
               </View>
@@ -231,53 +279,66 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'PROFILE' && (
               <>
-                <Section title="Academic Information">
-                  <InfoRow icon="id-card-outline" label="Student ID / GR No" value={profile?.studentId} />
-                  <InfoRow icon="document-text-outline" label="Enrollment No" value={profile?.enrollmentNo} />
-                  <InfoRow icon="card-outline" label="Roll No" value={profile?.rollNo} />
-                  <InfoRow icon="school-outline" label="Program" value={profile?.program} />
-                  <InfoRow
-                    icon="business-outline"
-                    label="Department"
-                    value={
-                      profile?.departmentName
-                        ? `${profile.departmentName} (${profile.departmentCode || ''})`
-                        : profile?.branch
-                    }
-                  />
-                  <InfoRow icon="calendar-outline" label="Academic Year" value={profile?.academicYear || profile?.admissionYear} />
-                  <InfoRow
-                    icon="layers-outline"
-                    label="Year & Semester"
-                    value={
-                      profile?.year
-                        ? `${profile.year} • Semester ${profile.semester ?? 6}`
-                        : `Semester ${profile?.semester ?? 6}`
-                    }
-                  />
-                  <InfoRow icon="people-outline" label="Division" value={profile?.division || profile?.section} />
-                  <InfoRow icon="trophy-outline" label="CGPA" value={profile?.cgpa} />
-                  <InfoRow icon="checkmark-circle-outline" label="Enrollment Status" value={profile?.enrollmentStatus || profile?.academicStatus} />
-                  <InfoRow icon="shield-checkmark-outline" label="Approval Status" value={profile?.approvalStatus || user?.status || 'APPROVED'} last />
-                </Section>
+                {error ? (
+                  <View style={styles.sectionWrap}>
+                    <EmptyState
+                      icon="alert-circle-outline"
+                      title="Unable to load profile"
+                      message={error}
+                      actionLabel="Retry"
+                      onAction={() => fetchData()}
+                    />
+                  </View>
+                ) : (
+                  <>
+                    <Section title="Academic Information">
+                      <InfoRow icon="id-card-outline" label="Student ID / GR No" value={profile?.studentId} />
+                      <InfoRow icon="document-text-outline" label="Enrollment No" value={profile?.enrollmentNo} />
+                      <InfoRow icon="card-outline" label="Roll No" value={profile?.rollNo} />
+                      <InfoRow icon="school-outline" label="Program" value={profile?.program} />
+                      <InfoRow
+                        icon="business-outline"
+                        label="Department"
+                        value={departmentDisplay(profile)}
+                      />
+                      <InfoRow icon="calendar-outline" label="Academic Year" value={profile?.academicYear} />
+                      <InfoRow
+                        icon="layers-outline"
+                        label="Year & Semester"
+                        value={formatYearSemester(profile?.year, profile?.semester)}
+                      />
+                      <InfoRow icon="people-outline" label="Division" value={profile?.division} />
+                      <InfoRow icon="trophy-outline" label="CGPA" value={profile?.cgpa} />
+                      <InfoRow
+                        icon="checkmark-circle-outline"
+                        label="Enrollment Status"
+                        value={formatStatus(profile?.enrollmentStatus)}
+                      />
+                      <InfoRow
+                        icon="shield-checkmark-outline"
+                        label="Approval Status"
+                        value={formatStatus(profile?.approvalStatus)}
+                        last
+                      />
+                    </Section>
 
-                <Section title="Personal Information">
-                  <InfoRow icon="calendar-number-outline" label="Date of Birth" value={profile?.dob} />
-                  <InfoRow icon="person-outline" label="Gender" value={profile?.gender} />
-                  <InfoRow icon="water-outline" label="Blood Group" value={profile?.bloodGroup} />
-                  <InfoRow icon="flag-outline" label="Nationality" value={profile?.nationality} />
-                  <InfoRow icon="people-circle-outline" label="Father's Name" value={profile?.fatherName} />
-                  <InfoRow icon="people-circle-outline" label="Mother's Name" value={profile?.motherName} />
-                  <InfoRow icon="call-outline" label="Phone" value={profile?.phone} />
-                  <InfoRow icon="home-outline" label="Address" value={profile?.address} last />
-                </Section>
+                    <Section title="Personal Information">
+                      <InfoRow icon="calendar-number-outline" label="Date of Birth" value={formatDisplayDate(profile?.dob)} />
+                      <InfoRow icon="person-outline" label="Gender" value={profile?.gender} />
+                      <InfoRow icon="water-outline" label="Blood Group" value={profile?.bloodGroup} />
+                      <InfoRow icon="flag-outline" label="Nationality" value={profile?.nationality} />
+                      <InfoRow icon="people-circle-outline" label="Father's Name" value={profile?.fatherName} />
+                      <InfoRow icon="people-circle-outline" label="Mother's Name" value={profile?.motherName} />
+                      <InfoRow icon="call-outline" label="Phone" value={profile?.phone || profile?.mobileNumber} />
+                      <InfoRow icon="home-outline" label="Address" value={profile?.address} last />
+                    </Section>
 
-                {profile?.emergencyContact && (
-                  <Section title="Emergency Contact">
-                    <InfoRow icon="person-outline" label="Name" value={profile.emergencyContact.name} />
-                    <InfoRow icon="heart-outline" label="Relationship" value={profile.emergencyContact.relationship} />
-                    <InfoRow icon="call-outline" label="Phone" value={profile.emergencyContact.phone} last />
-                  </Section>
+                    <Section title="Emergency Contact">
+                      <InfoRow icon="person-outline" label="Name" value={profile?.emergencyContact?.name} />
+                      <InfoRow icon="heart-outline" label="Relationship" value={profile?.emergencyContact?.relationship} />
+                      <InfoRow icon="call-outline" label="Phone" value={profile?.emergencyContact?.phone} last />
+                    </Section>
+                  </>
                 )}
               </>
             )}
@@ -287,35 +348,11 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'DOCUMENTS' && (
               <View style={styles.sectionWrap}>
-                <View style={styles.docsBanner}>
-                  <Ionicons name="shield-checkmark" size={20} color="#059669" />
-                  <View style={styles.docsBannerTextWrap}>
-                    <ThemedText style={styles.docsBannerTitle}>
-                      Digital Document Locker
-                    </ThemedText>
-                    <ThemedText style={styles.docsBannerSub}>
-                      All certificates are verified by the College Registrar Office.
-                    </ThemedText>
-                  </View>
-                </View>
-
-                {documents.map((doc) => (
-                  <View key={doc.id} style={styles.docCard}>
-                    <View style={styles.docIconWrap}>
-                      <Ionicons name="document-text" size={24} color="#3B82F6" />
-                    </View>
-                    <View style={styles.docDetails}>
-                      <ThemedText style={styles.docName}>{doc.name}</ThemedText>
-                      <ThemedText style={styles.docIssuer}>
-                        {doc.issue} • {doc.date}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.docVerifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={14} color="#059669" />
-                      <ThemedText style={styles.docVerifiedText}>Verified</ThemedText>
-                    </View>
-                  </View>
-                ))}
+                <EmptyState
+                  icon="shield-checkmark-outline"
+                  title="Documents unavailable"
+                  message="Verified student documents are not stored in the database yet, so this locker cannot show real records."
+                />
               </View>
             )}
 
@@ -324,70 +361,11 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'FEES' && (
               <View style={styles.sectionWrap}>
-                {/* Fee Status Card */}
-                <View style={styles.feeSummaryCard}>
-                  <View style={styles.feeHeaderRow}>
-                    <View>
-                      <ThemedText style={styles.feeHeaderTitle}>Academic Fees 2026-27</ThemedText>
-                      <ThemedText style={styles.feeHeaderSub}>Semester 3 Tuition & Labs</ThemedText>
-                    </View>
-                    <StatusBadge
-                      status={fees?.status === 'PAID' ? 'APPROVED' : 'WARNING'}
-                      label={fees?.status ?? 'PARTIAL'}
-                      size="sm"
-                    />
-                  </View>
-
-                  <View style={styles.feeAmountRow}>
-                    <View style={styles.feeAmountBlock}>
-                      <ThemedText style={styles.feeAmountLabel}>Total Due</ThemedText>
-                      <ThemedText style={styles.feeAmountValue}>
-                        ₹{fees?.totalFee?.toLocaleString('en-IN') ?? '85,000'}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.feeAmountBlock}>
-                      <ThemedText style={styles.feeAmountLabel}>Paid</ThemedText>
-                      <ThemedText style={[styles.feeAmountValue, { color: '#059669' }]}>
-                        ₹{fees?.paidAmount?.toLocaleString('en-IN') ?? '60,000'}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.feeAmountBlock}>
-                      <ThemedText style={styles.feeAmountLabel}>Pending</ThemedText>
-                      <ThemedText style={[styles.feeAmountValue, { color: '#DC2626' }]}>
-                        ₹{fees?.pendingAmount?.toLocaleString('en-IN') ?? '25,000'}
-                      </ThemedText>
-                    </View>
-                  </View>
-
-                  <View style={styles.feeDueBanner}>
-                    <Ionicons name="calendar-outline" size={14} color="#B45309" />
-                    <ThemedText style={styles.feeDueText}>
-                      Next Installment Due Date: {fees?.dueDate ?? 'Oct 30, 2026'}
-                    </ThemedText>
-                  </View>
-                </View>
-
-                {/* Receipts History */}
-                <ThemedText style={styles.subSectionTitle}>Payment History & Receipts</ThemedText>
-                {(fees?.transactions ?? []).map((tx) => (
-                  <View key={tx.id} style={styles.txCard}>
-                    <View style={styles.txIconWrap}>
-                      <Ionicons name="receipt-outline" size={20} color="#059669" />
-                    </View>
-                    <View style={styles.txInfo}>
-                      <ThemedText style={styles.txReceipt}>{tx.receiptNo}</ThemedText>
-                      <ThemedText style={styles.txDate}>
-                        {tx.date} • {tx.mode}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.txRight}>
-                      <ThemedText style={styles.txAmount}>
-                        ₹{tx.amount.toLocaleString('en-IN')}
-                      </ThemedText>
-                      <ThemedText style={styles.txSuccess}>Paid Successfully</ThemedText>
-                    </View>
-                  </View>
-                ))}
+                <EmptyState
+                  icon="wallet-outline"
+                  title="Fee summary unavailable"
+                  message="Fee amounts and payment history are not stored in the student database yet, so this tab cannot show real records."
+                />
               </View>
             )}
 
@@ -396,46 +374,11 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'LIBRARY' && (
               <View style={styles.sectionWrap}>
-                {/* Library Stat Bar */}
-                <View style={styles.libStatRow}>
-                  <View style={styles.libStatBox}>
-                    <ThemedText style={styles.libStatVal}>
-                      {library?.issuedBooksCount ?? 2} / {library?.maxAllowed ?? 4}
-                    </ThemedText>
-                    <ThemedText style={styles.libStatLbl}>Books Issued</ThemedText>
-                  </View>
-                  <View style={styles.libStatBox}>
-                    <ThemedText style={[styles.libStatVal, { color: '#059669' }]}>
-                      ₹{library?.fineAmount ?? 0}
-                    </ThemedText>
-                    <ThemedText style={styles.libStatLbl}>Outstanding Fine</ThemedText>
-                  </View>
-                </View>
-
-                <ThemedText style={styles.subSectionTitle}>Issued Books & Due Dates</ThemedText>
-
-                {(library?.books ?? []).map((b) => (
-                  <View key={b.id} style={styles.bookCard}>
-                    <View style={styles.bookIconWrap}>
-                      <Ionicons name="book" size={24} color="#7C3AED" />
-                    </View>
-                    <View style={styles.bookDetails}>
-                      <ThemedText style={styles.bookTitle}>{b.title}</ThemedText>
-                      <ThemedText style={styles.bookAuthor}>By {b.author}</ThemedText>
-                      <View style={styles.bookMetaRow}>
-                        <ThemedText style={styles.bookDueText}>Due: {b.dueDate}</ThemedText>
-                        <ThemedText style={styles.bookDaysLeft}>
-                          ({b.daysRemaining} days left)
-                        </ThemedText>
-                      </View>
-                    </View>
-                    <Pressable
-                      style={styles.renewBtn}
-                      onPress={() => Alert.alert('Renewal Requested', `Renewal request sent for "${b.title}".`)}>
-                      <ThemedText style={styles.renewBtnText}>Renew</ThemedText>
-                    </Pressable>
-                  </View>
-                ))}
+                <EmptyState
+                  icon="book-outline"
+                  title="Library records unavailable"
+                  message="Issued books and fines are not stored in the student database yet, so this tab cannot show real records."
+                />
               </View>
             )}
 
@@ -907,5 +850,6 @@ const infoStyles = StyleSheet.create({
   texts: { flex: 1 },
   label: { fontSize: 11, color: '#94A3B8', fontWeight: '600' },
   value: { fontSize: 14, color: Navy.primary, fontWeight: '600', marginTop: 1 },
+  missing: { color: '#94A3B8', fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#E2E8F0', marginHorizontal: Spacing.three },
 });

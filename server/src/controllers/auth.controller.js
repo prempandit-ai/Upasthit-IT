@@ -3,25 +3,158 @@ const { comparePassword, hashPassword } = require("../utils/hashPassword");
 const { generateToken } = require("../utils/jwt");
 const userService = require("../services/user.service");
 const { sanitizeUser, buildTokenPayload } = require("../utils/userHelpers");
+const {
+  generateStudentId,
+  emptyToNull,
+  parseDateOfBirth,
+  assertSemesterForYear,
+  registrationOptions,
+} = require("../utils/studentRegistration");
+
+exports.getRegistrationOptions = async (req, res, next) => {
+  try {
+    const departments = await prisma.department.findMany({
+      select: { id: true, code: true, name: true },
+      orderBy: { code: "asc" },
+    });
+
+    return res.json({
+      success: true,
+      ...registrationOptions(departments),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 exports.registerStudent = async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const name = emptyToNull(req.body.name);
+    const email = emptyToNull(req.body.email);
+    const password = req.body.password;
+    const departmentId = Number(req.body.departmentId);
+    const program = emptyToNull(req.body.program);
+    const rollNo = Number(req.body.rollNo);
+    const academicYear = emptyToNull(req.body.academicYear);
+    const year = emptyToNull(req.body.year);
+    const semester = Number(req.body.semester);
+    const division = emptyToNull(req.body.division);
 
-    const user = await userService.createPendingUser({
-      name,
-      email,
-      password,
-      role: "STUDENT",
+    assertSemesterForYear(year, semester);
+
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Email already exists",
+      });
+    }
+
+    const department = await prisma.department.findUnique({
+      where: { id: departmentId },
+    });
+    if (!department) {
+      return res.status(422).json({
+        success: false,
+        message: "Selected department was not found",
+      });
+    }
+
+    const duplicateRoll = await prisma.studentProfile.findFirst({
+      where: {
+        departmentId: department.id,
+        academicYear,
+        year,
+        division,
+        rollNo,
+      },
+      select: { id: true },
+    });
+    if (duplicateRoll) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "A student with this roll number already exists for the selected department, year, and division",
+      });
+    }
+
+    let studentId = generateStudentId();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const existingId = await prisma.studentProfile.findUnique({
+        where: { studentId },
+        select: { id: true },
+      });
+      if (!existingId) break;
+      studentId = generateStudentId();
+    }
+
+    const hashedPassword = await hashPassword(password);
+    const dateOfBirth = parseDateOfBirth(req.body.dateOfBirth);
+
+    const created = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name,
+          email,
+          password: hashedPassword,
+          role: "STUDENT",
+          status: "PENDING",
+        },
+      });
+
+      const profile = await tx.studentProfile.create({
+        data: {
+          userId: user.id,
+          studentId,
+          rollNo,
+          enrollmentNo: null,
+          mobileNumber: emptyToNull(req.body.phone || req.body.mobileNumber),
+          gender: emptyToNull(req.body.gender),
+          enrollmentStatus: "ACTIVE",
+          program,
+          dateOfBirth,
+          bloodGroup: emptyToNull(req.body.bloodGroup),
+          nationality: emptyToNull(req.body.nationality),
+          fatherName: emptyToNull(req.body.fatherName),
+          motherName: emptyToNull(req.body.motherName),
+          address: emptyToNull(req.body.address),
+          emergencyContactName: emptyToNull(req.body.emergencyContactName),
+          emergencyContactRelationship: emptyToNull(req.body.emergencyContactRelationship),
+          emergencyContactPhone: emptyToNull(req.body.emergencyContactPhone),
+          departmentId: department.id,
+          departmentCode: department.code,
+          departmentName: department.name,
+          academicYear,
+          semester,
+          division,
+          year,
+        },
+      });
+
+      return { user, profile };
     });
 
     return res.status(201).json({
       success: true,
       message:
         "Registration submitted. Your account is pending approval by a Coordinator.",
-      user: sanitizeUser(user),
+      user: sanitizeUser({
+        ...created.user,
+        studentProfile: created.profile,
+      }),
     });
   } catch (error) {
+    if (error.code === "P2002") {
+      const target = error.meta?.target || [];
+      const message = target.includes("email")
+        ? "Email already exists"
+        : target.includes("studentId")
+          ? "Student ID / GR number already exists"
+          : target.includes("enrollmentNo")
+            ? "Enrollment number already exists"
+            : "A record with this unique value already exists";
+      return res.status(409).json({ success: false, message });
+    }
     next(error);
   }
 };
