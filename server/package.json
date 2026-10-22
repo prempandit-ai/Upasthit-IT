@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "predev": "prisma generate",
+    "prestart": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "keywords": [],
   "author": "",

@@ -68,6 +68,10 @@ module.exports = async (req, res, next) => {
     };
     next();
   } catch (error) {
+    if (!["TokenExpiredError", "JsonWebTokenError", "NotBeforeError"].includes(error.name)) {
+      return next(error);
+    }
+
     const message =
       error.name === "TokenExpiredError"
         ? "Token expired"

@@ -56,12 +56,12 @@ enum AttendanceStatus {
 // ─── Core Auth Table (UNCHANGED) ─────────────────────────────────────────────
 
 model User {
-  id        String        @id @default(cuid())
-  name      String
-  email     String        @unique
-  password  String
-  role      Role
-  status    AccountStatus @default(PENDING)
+  id                 String        @id @default(cuid())
+  name               String
+  email              String        @unique
+  password           String
+  role               Role
+  status             AccountStatus @default(PENDING)
   isActive           Boolean       @default(true)
   mustChangePassword Boolean       @default(false)
   tokenVersion       Int           @default(0)
@@ -241,8 +241,7 @@ model FacultySubjectAssignment {
   academicYear String
   division     String? // A, B, C — null means all divisions
 
-  createdAt DateTime @default(now())
-
+  createdAt          DateTime            @default(now())
   attendanceSessions AttendanceSession[]
 
   @@unique([facultyId, subjectId, academicYear, division])
