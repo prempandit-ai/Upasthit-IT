@@ -22,10 +22,13 @@ exports.getFacultyAssignments = async (req, res, next) => {
 
 exports.getEligibleStudents = async (req, res, next) => {
   try {
-    const { assignmentId, division } = req.query;
+    const { assignmentId, division, labBatch, sessionType, attendanceType } = req.query;
     const data = await attendanceService.listEligibleStudents(req.user.id, {
       assignmentId,
       division,
+      labBatch,
+      sessionType,
+      attendanceType,
     });
     return res.json({ success: true, ...data });
   } catch (error) {
@@ -35,7 +38,7 @@ exports.getEligibleStudents = async (req, res, next) => {
 
 exports.getClassStudents = async (req, res, next) => {
   try {
-    const { year, semester, division, department, academicYear, assignmentId } = req.query;
+    const { year, semester, division, department, academicYear, assignmentId, labBatch, sessionType, attendanceType } = req.query;
     const data = await attendanceService.listClassStudents(req.user.id, {
       year,
       semester,
@@ -43,6 +46,9 @@ exports.getClassStudents = async (req, res, next) => {
       department,
       academicYear,
       assignmentId,
+      labBatch,
+      sessionType,
+      attendanceType,
     });
     return res.json({ success: true, ...data });
   } catch (error) {

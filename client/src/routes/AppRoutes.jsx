@@ -22,6 +22,7 @@ import EventCalendarPage from "../pages/coordinator/events/EventCalendarPage";
 import ParticipantsListPage from "../pages/coordinator/participants/ParticipantsListPage";
 import AddParticipantPage from "../pages/coordinator/participants/AddParticipantPage";
 import ImportParticipantsPage from "../pages/coordinator/participants/ImportParticipantsPage";
+import StudentBatchAllocationPage from "../pages/coordinator/participants/StudentBatchAllocationPage";
 import FacultyListPage from "../pages/coordinator/faculty/FacultyListPage";
 import AddFacultyPage from "../pages/coordinator/faculty/AddFacultyPage";
 import FacultyMappingPage from "../pages/coordinator/faculty/FacultyMappingPage";
@@ -195,6 +196,7 @@ const AppRoutes = () => {
 
             {/* Participants */}
             <Route path="/dashboard/coordinator/participants" element={<ParticipantsListPage />} />
+            <Route path="/dashboard/coordinator/participants/batches" element={<StudentBatchAllocationPage />} />
             <Route path="/dashboard/coordinator/participants/add" element={<AddParticipantPage />} />
             <Route path="/dashboard/coordinator/participants/import" element={<ImportParticipantsPage />} />
 

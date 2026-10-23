@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "allocate:lab-batches": "node scripts/allocate-student-lab-batches.js",
     "predev": "prisma generate",
     "prestart": "prisma generate",
     "postinstall": "prisma generate"

@@ -241,11 +241,12 @@ exports.importStudents = async (req, res, next) => {
       const academicYear   = str(row["Academic Year"] || row["AcademicYear"] || "");
       const semesterVal    = num(row["Semester"] || row["semester"] || row["SEM"]);
       const division       = str(row["Division"] || row["Div"] || row["div"] || "").toUpperCase();
-      const yearRaw        = str(row["Year"] || row["Year Level"] || row["Level"] || "BE").toUpperCase();
+      const yearRaw        = str(row["Year"] || row["Year Level"] || row["Level"] || "").toUpperCase();
       const defaultPwd     = str(row["Password"] || row["password"] || "Student@123");
 
       const validYears = ["FY", "SY", "TY", "BE"];
-      const yearVal = validYears.includes(yearRaw) ? yearRaw : "BE";
+      const yearToken = yearRaw.split(/[\s(/-]/)[0];
+      const yearVal = yearToken === "TE" ? "TY" : yearToken;
 
       if (!studentId) {
         results.failed.push({ row: rowNum, reason: "Missing Student ID / GR No" });
@@ -259,6 +260,11 @@ exports.importStudents = async (req, res, next) => {
       }
       if (!email || !email.includes("@")) {
         results.failed.push({ row: rowNum, reason: "Missing/invalid Email", studentId });
+        results.skipped++;
+        continue;
+      }
+      if (!validYears.includes(yearVal)) {
+        results.failed.push({ row: rowNum, reason: "Missing/invalid Year (use FY, SY, TE/TY, or BE)", studentId });
         results.skipped++;
         continue;
       }

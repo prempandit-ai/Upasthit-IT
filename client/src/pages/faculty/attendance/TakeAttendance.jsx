@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ClockIcon,
@@ -12,7 +12,6 @@ import { useToast } from '../../../context/ToastContext';
 import {
   getFacultyAttendanceAssignments,
   getEligibleAttendanceStudents,
-  getAttendanceStudents,
   createAttendanceSession,
   startAttendanceSessionById,
   getActiveAttendanceSession,
@@ -34,6 +33,17 @@ import {
 const IT_DEPARTMENT_LABEL = 'Information Technology (IT)';
 const EMPTY_ROSTER_MESSAGE =
   'No students found for the selected class. Student enrollment data may not be available yet.';
+const emptyLabRosterMessage = (batch, division) => {
+  const normalizedDivision = String(division || '')
+    .replace(/^(section|division|div)\s*/i, '')
+    .trim()
+    .toUpperCase();
+  return `No students are allocated to ${batch} in Division ${normalizedDivision}. Ask the coordinator to assign student lab batches before starting attendance.`;
+};
+const formatDivisionOption = (value) => {
+  const division = String(value || '').replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
+  return division === 'ALL' ? 'All Divisions' : division ? `Div ${division}` : '';
+};
 
 const formatTimer = (seconds) => {
   const mins = Math.floor(Math.max(0, seconds) / 60);
@@ -73,6 +83,7 @@ const TakeAttendance = () => {
   const [attendanceType, setAttendanceType] = useState('Class Lecture');
   const [department] = useState(IT_DEPARTMENT_LABEL);
   const [batch, setBatch] = useState('');
+  const [labBatch, setLabBatch] = useState('');
   const [subject, setSubject] = useState('');
   const [sessionType, setSessionType] = useState('Lecture');
   const [section, setSection] = useState('');
@@ -86,6 +97,7 @@ const TakeAttendance = () => {
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState('');
+  const rosterRequestId = useRef(0);
   const [searchStudent, setSearchStudent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [backendStats, setBackendStats] = useState({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
@@ -99,7 +111,7 @@ const TakeAttendance = () => {
   const [approvals, setApprovals] = useState([]);
 
   const selectedAssignment = useMemo(() => {
-    const normalizedSection = section.replace(/^Section\s+/i, '').replace(/^Div\s+/i, '').trim().toUpperCase();
+    const normalizedSection = section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
     return (
       assignments.find(
         (item) =>
@@ -113,6 +125,8 @@ const TakeAttendance = () => {
       null
     );
   }, [assignments, batch, subject, section]);
+
+  const isLabSession = attendanceType === 'Lab Session';
 
   const batchOptions = useMemo(() => {
     return Array.from(new Set(assignments.map((item) => item.batchLabel).filter(Boolean)));
@@ -136,21 +150,25 @@ const TakeAttendance = () => {
     if (matching.length === 0) return [];
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
     if (explicitDivisions.length > 0) {
-      const list = explicitDivisions.map((d) => (String(d).startsWith('Div') ? d : `Div ${d}`));
-      if (list.length > 1) list.push('All Divisions');
-      return Array.from(new Set(list));
+      return Array.from(new Set(explicitDivisions
+        .map((d) => String(d).replace(/^(section|division|div)\s*/i, '').trim().toUpperCase())
+        .filter((d) => ['A', 'B'].includes(d))
+        .map((d) => `Div ${d}`)));
     }
-    return ['Div A', 'Div B', 'All Divisions'];
+    return ['Div A', 'Div B'];
   }, [assignments, batch, subject]);
 
   const sessionStatus = session?.status || 'NOT_STARTED';
   const sessionActive = sessionStatus === 'ACTIVE' && timeLeftSeconds > 0;
+  const selectionLocked = sessionStatus === 'ACTIVE';
   const canMark = sessionActive;
-  const canSubmit = sessionActive && students.length > 0;
+  const canSubmit = sessionActive && students.some((student) => student.eligible !== false);
+  const cannotStartEmptyLab = isLabSession && (!labBatch || studentsLoading || students.length === 0);
 
   const sessionDetails = {
     course: session?.assignment?.subjectName || subject || '—',
-    section: session?.assignment?.sectionLabel || section || '—',
+    section: formatDivisionOption(session?.division || section) || '—',
+    labBatch: session?.labBatch || '',
     room: session?.room || '—',
     startTime: session?.startedAt ? formatClockTime(session.startedAt) : '—',
     endTime: session?.expiresAt ? formatClockTime(session.expiresAt) : '—',
@@ -185,6 +203,7 @@ const TakeAttendance = () => {
     if (!nextSession) {
       setSession(null);
       setTimeLeftSeconds(0);
+      setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
       storeAttendanceSessionId(null);
       return;
     }
@@ -205,28 +224,41 @@ const TakeAttendance = () => {
     }
   }, [showToast]);
 
-  const loadRoster = useCallback(async (assignment, division) => {
+  const loadRoster = useCallback(async (assignment, division, selectedLabBatch, type) => {
+    const requestId = ++rosterRequestId.current;
     if (!assignment?.id) {
       setStudents([]);
+      setStudentsLoading(false);
+      setStudentsError('');
       setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
       return;
     }
+    if (type === 'Lab Session' && !selectedLabBatch) {
+      setStudents([]);
+      setStudentsLoading(false);
+      setStudentsError('Select a lab batch to load its assigned students.');
+      setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
+      return;
+    }
+    setStudents([]);
     setStudentsLoading(true);
     setStudentsError('');
     try {
-      const { data } = await getAttendanceStudents({
-        year: assignment.year,
-        semester: assignment.semester,
-        division: division || assignment.division || 'ALL',
-        academicYear: assignment.academicYear,
+      const { data } = await getEligibleAttendanceStudents({
         assignmentId: assignment.id,
+        division: division || assignment.division || 'ALL',
+        sessionType: type,
+        attendanceType: type === 'Lab Session' ? 'Lab Session' : 'Class Lecture',
+        ...(type === 'Lab Session' ? { labBatch: selectedLabBatch } : {}),
       });
       const roster = (data.students || [])
         .map((student) => ({
           ...student,
           status: student.status || '',
+          eligible: student.eligible !== false,
         }))
         .sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
+      if (requestId !== rosterRequestId.current) return;
       setStudents(roster);
       setBackendStats({
         total: roster.length,
@@ -235,12 +267,26 @@ const TakeAttendance = () => {
         present: roster.filter((student) => student.status === 'PRESENT').length,
         absent: roster.filter((student) => student.status === 'ABSENT').length,
       });
-      if (roster.length === 0) setStudentsError(EMPTY_ROSTER_MESSAGE);
+      if (roster.length === 0) {
+        setStudentsError(
+          type === 'Lab Session'
+            ? emptyLabRosterMessage(selectedLabBatch, division)
+            : EMPTY_ROSTER_MESSAGE
+        );
+      }
     } catch (error) {
+      if (requestId !== rosterRequestId.current) return;
       setStudents([]);
-      setStudentsError(getAttendanceErrorMessage(error, EMPTY_ROSTER_MESSAGE));
+      setStudentsError(
+        getAttendanceErrorMessage(
+          error,
+          type === 'Lab Session'
+            ? emptyLabRosterMessage(selectedLabBatch, division)
+            : EMPTY_ROSTER_MESSAGE
+        )
+      );
     } finally {
-      setStudentsLoading(false);
+      if (requestId === rosterRequestId.current) setStudentsLoading(false);
     }
   }, []);
 
@@ -253,10 +299,23 @@ const TakeAttendance = () => {
         .map((student) => ({
           ...student,
           status: student.status || '',
+          eligible: student.eligible !== false,
         }))
         .sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
       setStudents(roster);
-      if (data.session) applySession(data.session);
+      if (data.session) {
+        applySession(data.session);
+        if (data.session.assignment) {
+          setBatch(data.session.assignment.batchLabel || '');
+          setSubject(data.session.assignment.subjectName || '');
+        }
+        const currentDivision = data.session.division || data.session.assignment?.division || 'A';
+        setSection(formatDivisionOption(currentDivision));
+        setLabBatch(data.session.labBatch || '');
+        const currentType = data.session.attendanceType || (data.session.labBatch ? 'Lab Session' : 'Class Lecture');
+        setAttendanceType(/lab/i.test(currentType) ? 'Lab Session' : currentType === 'Event' ? 'Event' : 'Class Lecture');
+        setSessionType(data.session.sessionType || (/lab/i.test(currentType) ? 'Lab Session' : 'Lecture'));
+      }
       if (roster.length === 0) setStudentsError(EMPTY_ROSTER_MESSAGE);
     } catch (error) {
       setStudents([]);
@@ -282,11 +341,12 @@ const TakeAttendance = () => {
         if (nextAssignments[0]) {
           setBatch(nextAssignments[0].batchLabel);
           setSubject(nextAssignments[0].subjectName);
-          const initialDiv = nextAssignments[0].division
-            ? (String(nextAssignments[0].division).startsWith('Div') ? nextAssignments[0].division : `Div ${nextAssignments[0].division}`)
-            : 'Div A';
+          const initialDiv = formatDivisionOption(nextAssignments[0].division) || 'Div A';
           setSection(initialDiv);
-          if (nextAssignments[0].subjectType === 'PRACTICAL') setSessionType('Lab Session');
+          if (nextAssignments[0].subjectType === 'PRACTICAL') {
+            setAttendanceType('Lab Session');
+            setSessionType('Lab Session');
+          }
         }
       } catch (error) {
         if (cancelled) return;
@@ -344,14 +404,9 @@ const TakeAttendance = () => {
   }, [applySession, loadHistory, loadSessionStudents, showToast]);
 
   useEffect(() => {
-    if (!sessionActive || !selectedAssignment || session) return;
-    loadRoster(selectedAssignment, section);
-  }, [selectedAssignment, section, sessionActive, session, loadRoster]);
-
-  useEffect(() => {
     if (session) return;
-    if (selectedAssignment) loadRoster(selectedAssignment, section);
-  }, [selectedAssignment, section, session, loadRoster]);
+    if (selectedAssignment) loadRoster(selectedAssignment, section, labBatch, sessionType);
+  }, [selectedAssignment, section, labBatch, sessionType, session, loadRoster]);
 
   useEffect(() => {
     if (!sessionActive) return undefined;
@@ -388,7 +443,9 @@ const TakeAttendance = () => {
   }, [timeLeftSeconds, session, sessionStatus, applySession, loadSessionStudents, loadHistory]);
 
   const handleBatchChange = (value) => {
+    clearSelectionSession();
     setBatch(value);
+    setLabBatch('');
     const nextSubjects = assignments.filter((item) => item.batchLabel === value);
     const nextSubject = nextSubjects[0]?.subjectName || '';
     setSubject(nextSubject);
@@ -396,27 +453,68 @@ const TakeAttendance = () => {
       (item) => item.batchLabel === value && (!nextSubject || item.subjectName === nextSubject)
     );
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
-    const defaultSection = explicitDivisions.length > 0
-      ? (String(explicitDivisions[0]).startsWith('Div') ? explicitDivisions[0] : `Div ${explicitDivisions[0]}`)
-      : 'Div A';
+    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'Div A';
     setSection(defaultSection);
   };
 
   const handleSubjectChange = (value) => {
+    clearSelectionSession();
     setSubject(value);
+    setLabBatch('');
     const matching = assignments.filter(
       (item) => (!batch || item.batchLabel === batch) && item.subjectName === value
     );
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
-    const defaultSection = explicitDivisions.length > 0
-      ? (String(explicitDivisions[0]).startsWith('Div') ? explicitDivisions[0] : `Div ${explicitDivisions[0]}`)
-      : 'Div A';
+    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'Div A';
     setSection(defaultSection);
+  };
+
+  const clearSelectionSession = () => {
+    if (selectionLocked) return;
+    rosterRequestId.current += 1;
+    applySession(null);
+    setStudents([]);
+    setStudentsLoading(false);
+    setStudentsError('');
+  };
+
+  const handleAttendanceTypeChange = (value) => {
+    clearSelectionSession();
+    setAttendanceType(value);
+    setSessionType(value === 'Class Lecture' ? 'Lecture' : value);
+    if (value !== 'Lab Session') setLabBatch('');
+  };
+
+  const handleDivisionChange = (value) => {
+    clearSelectionSession();
+    setSection(value);
+    setLabBatch('');
+  };
+
+  const handleLabBatchChange = (value) => {
+    clearSelectionSession();
+    setLabBatch(value);
   };
 
   const handleStartSession = async () => {
     if (!selectedAssignment) {
       showToast('Select a valid assigned subject, batch, and class before starting attendance.', 'error');
+      return;
+    }
+    if (!['A', 'B'].includes(section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase())) {
+      showToast('Select Division A or Division B before starting attendance.', 'error');
+      return;
+    }
+    if (isLabSession && !['A1', 'A2', 'A3', 'B1', 'B2', 'B3'].includes(labBatch)) {
+      showToast('Select a lab batch before starting lab attendance.', 'error');
+      return;
+    }
+    if (isLabSession && studentsLoading) {
+      showToast('Wait for the selected lab batch roster to finish loading.', 'warning');
+      return;
+    }
+    if (isLabSession && students.length === 0) {
+      showToast(emptyLabRosterMessage(labBatch, section), 'error');
       return;
     }
     if (!date) {
@@ -434,6 +532,7 @@ const TakeAttendance = () => {
         assignmentId: selectedAssignment.id,
         date,
         division: section || selectedAssignment.division || 'ALL',
+        labBatch: isLabSession ? labBatch : null,
         attendanceType,
         sessionType,
         lectureTime: time,
@@ -462,13 +561,15 @@ const TakeAttendance = () => {
       showToast('Start the attendance window before marking students.', 'warning');
       return;
     }
-    setStudents((prev) => prev.map((s) => ({ ...s, status })));
+    setStudents((prev) => prev.map((s) => (s.eligible === false ? s : { ...s, status })));
     showToast(`Marked all students as ${status}`, 'info');
   };
 
   const handleStatusChange = (id, newStatus) => {
     if (!canMark) return;
-    setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, status: newStatus } : s)));
+    setStudents((prev) => prev.map((s) =>
+      s.id === id && s.eligible !== false ? { ...s, status: newStatus } : s
+    ));
   };
 
   const handleSubmitAttendance = async () => {
@@ -477,7 +578,7 @@ const TakeAttendance = () => {
       return;
     }
     const records = students
-      .filter((student) => student.status)
+      .filter((student) => student.eligible !== false && student.status)
       .map((student) => ({ studentId: student.id, status: student.status }));
     if (records.length === 0) {
       showToast('Mark at least one student before submitting attendance.', 'warning');
@@ -521,7 +622,11 @@ const TakeAttendance = () => {
       if (data.session?.assignment) {
         setBatch(data.session.assignment.batchLabel || '');
         setSubject(data.session.assignment.subjectName || '');
-        setSection(data.session.assignment.sectionLabel || '');
+        const currentDivision = data.session.division || data.session.assignment.division || 'A';
+        setSection(formatDivisionOption(currentDivision));
+        setLabBatch(data.session.labBatch || '');
+        setAttendanceType(/lab/i.test(data.session.attendanceType || data.session.sessionType || '') ? 'Lab Session' : 'Class Lecture');
+        setSessionType(data.session.sessionType || 'Lecture');
       }
       showToast(`Loaded session details for ${row.subject || 'this class'}`, 'info');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -598,7 +703,8 @@ const TakeAttendance = () => {
                 type="radio"
                 name="attendanceType"
                 checked={attendanceType === t}
-                onChange={() => setAttendanceType(t)}
+                onChange={() => handleAttendanceTypeChange(t)}
+                disabled={selectionLocked}
                 className="h-4 w-4 text-blue-600 focus:ring-blue-500"
               />
               <span>{t}</span>
@@ -620,10 +726,11 @@ const TakeAttendance = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Batch / Semester</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Academic Year / Semester</label>
             <select
               value={batch}
               onChange={(e) => handleBatchChange(e.target.value)}
+              disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
             >
               {batchOptions.length === 0 ? (
@@ -643,6 +750,7 @@ const TakeAttendance = () => {
             <select
               value={subject}
               onChange={(e) => handleSubjectChange(e.target.value)}
+              disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
             >
               {subjectOptions.length === 0 ? (
@@ -658,23 +766,11 @@ const TakeAttendance = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Session Type</label>
-            <select
-              value={sessionType}
-              onChange={(e) => setSessionType(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
-            >
-              <option>Lecture</option>
-              <option>Lab Session</option>
-              <option>Tutorial</option>
-            </select>
-          </div>
-
-          <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Class / Section</label>
             <select
               value={section}
-              onChange={(e) => setSection(e.target.value)}
+              onChange={(e) => handleDivisionChange(e.target.value)}
+              disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
             >
               {sectionOptions.length === 0 ? (
@@ -689,12 +785,33 @@ const TakeAttendance = () => {
             </select>
           </div>
 
+          {isLabSession && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Lab Batch</label>
+              <select
+                value={labBatch}
+                onChange={(e) => handleLabBatchChange(e.target.value)}
+                disabled={selectionLocked}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
+              >
+                <option value="">Select lab batch</option>
+                {(section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase() === 'A'
+                  ? ['A1', 'A2', 'A3']
+                  : section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase() === 'B'
+                    ? ['B1', 'B2', 'B3']
+                    : []
+                ).map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
+              disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
             />
           </div>
@@ -705,6 +822,7 @@ const TakeAttendance = () => {
               type="text"
               value={time}
               onChange={(e) => setTime(e.target.value)}
+              disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
             />
           </div>
@@ -721,7 +839,7 @@ const TakeAttendance = () => {
           </p>
           <button
             type="button"
-            disabled={starting || sessionActive}
+            disabled={starting || selectionLocked || cannotStartEmptyLab}
             onClick={handleStartSession}
             className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition-colors disabled:opacity-60"
           >
@@ -761,7 +879,7 @@ const TakeAttendance = () => {
                 Started at: <span className="font-medium text-slate-900">{sessionDetails.startTime}</span> | Ends at: <span className="font-medium text-slate-900">{sessionDetails.endTime}</span>
               </p>
               <p className="mt-0.5 text-xs text-slate-600">
-                Course: <span className="font-medium text-slate-900">{sessionDetails.course}</span> | Section: <span className="font-medium text-slate-900">{sessionDetails.section}</span> | Room: <span className="font-medium text-slate-900">{sessionDetails.room}</span>
+                Course: <span className="font-medium text-slate-900">{sessionDetails.course}</span> | Section: <span className="font-medium text-slate-900">{sessionDetails.section}</span>{sessionDetails.labBatch ? <> | Lab Batch: <span className="font-medium text-slate-900">{sessionDetails.labBatch}</span></> : null} | Room: <span className="font-medium text-slate-900">{sessionDetails.room}</span>
               </p>
             </div>
           </div>
@@ -856,11 +974,18 @@ const TakeAttendance = () => {
                   <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 text-slate-400">{idx + 1}</td>
                     <td className="px-4 py-3 font-mono font-medium text-slate-900">{st.rollNo || '—'}</td>
-                    <td className="px-4 py-3 font-medium text-slate-900">{st.name}</td>
+                    <td className="px-4 py-3 font-medium text-slate-900">
+                      {st.name}
+                      {st.eligible === false ? (
+                        <span className="ml-2 text-[10px] font-medium text-amber-700">
+                          Historical record · not in current roster
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-3">
                       <select
                         value={st.status || ''}
-                        disabled={!canMark}
+                        disabled={!canMark || st.eligible === false}
                         onChange={(e) => handleStatusChange(st.id, e.target.value)}
                         className={`rounded-md border px-2 py-1 text-xs font-semibold uppercase ${
                           st.status === 'PRESENT'

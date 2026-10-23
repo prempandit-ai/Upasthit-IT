@@ -46,6 +46,7 @@ const NAV_ITEMS = [
     baseHref: `${BASE}/participants`,
     children: [
       { label: 'Participant List', href: `${BASE}/participants` },
+      { label: 'Lab Batch Allocation', href: `${BASE}/participants/batches` },
       { label: 'Add Participant', href: `${BASE}/participants/add` },
       { label: 'Import Participants', href: `${BASE}/participants/import` },
     ],
@@ -221,7 +222,7 @@ const CoordinatorSidebar = ({ open, onClose }) => {
                     {item.children.map((child) => {
                       const isChildActive =
                         location.pathname === child.href ||
-                        (child.href !== BASE && location.pathname.startsWith(child.href));
+                        (child.href !== `${BASE}/participants` && child.href !== BASE && location.pathname.startsWith(child.href));
 
                       return (
                         <NavLink

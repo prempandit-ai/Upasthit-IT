@@ -128,6 +128,7 @@ model StudentProfile {
   academicYear String // e.g. "2025-26"
   semester     Int // 1–8
   division     String? // A, B, C
+  labBatch     String? // A1-A3 or B1-B3; null until allocated
   year         Year // FY, SY, TY, BE
 
   createdAt DateTime @default(now())
@@ -311,6 +312,7 @@ model AttendanceSession {
   status                AttendanceSessionStatus @default(NOT_STARTED)
   attendanceType        String?
   sessionType           String?
+  labBatch              String?
   lectureTime           String?
   startedAt             DateTime?
   expiresAt             DateTime?

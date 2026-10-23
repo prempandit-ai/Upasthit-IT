@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { normalizeDivision: normalizeLabDivision, isValidLabBatch } = require("../utils/labBatch");
 
 const IT_DEPARTMENT_CODE = "IT";
 const DEFAULT_WINDOW_SECONDS = 300;
@@ -31,7 +32,56 @@ function normalizeDivision(value) {
   if (!value) return null;
   const s = String(value).trim();
   if (/^all(\s+(sections|divisions))?$/i.test(s)) return "ALL";
-  return s.replace(/^(section|division|div)\s+/i, "").trim().toUpperCase();
+  return normalizeLabDivision(s);
+}
+
+function isLabAttendance({ sessionType, attendanceType, labBatch } = {}) {
+  return Boolean(labBatch) || /lab/i.test(`${sessionType || ""} ${attendanceType || ""}`);
+}
+
+function divisionFilter(division) {
+  return {
+    OR: [
+      { division: { equals: division, mode: "insensitive" } },
+      { division: { equals: `Div ${division}`, mode: "insensitive" } },
+      { division: { equals: `Division ${division}`, mode: "insensitive" } },
+      { division: { equals: `Section ${division}`, mode: "insensitive" } },
+    ],
+  };
+}
+
+function buildRosterWhere(assignment, { division, labBatch, sessionType, attendanceType, allowAllDivisions = false } = {}) {
+  const normalizedDivision = normalizeDivision(division) || normalizeDivision(assignment.division) || "ALL";
+  if (assignment.division && normalizedDivision !== "ALL" && normalizeDivision(assignment.division) !== normalizedDivision) {
+    throw new AttendanceError("You are not assigned to the selected division", 403);
+  }
+
+  const isLab = isLabAttendance({ sessionType, attendanceType, labBatch });
+  const normalizedBatch = labBatch ? String(labBatch).trim().toUpperCase() : null;
+  if (normalizedDivision === "ALL" && !allowAllDivisions) {
+    throw new AttendanceError("Select Division A or Division B before loading students");
+  }
+  if (isLab && normalizedDivision !== "ALL" && !isValidLabBatch(normalizedBatch, normalizedDivision)) {
+    throw new AttendanceError("Select a valid lab batch for the selected division");
+  }
+  if (isLab && normalizedDivision === "ALL") {
+    throw new AttendanceError("Select a division before loading lab attendance");
+  }
+
+  const where = {
+    enrollmentStatus: "ACTIVE",
+    academicYear: assignment.academicYear,
+    year: assignment.subject.year,
+    semester: assignment.subject.semester,
+    OR: [
+      { department: { code: IT_DEPARTMENT_CODE } },
+      { departmentCode: IT_DEPARTMENT_CODE },
+      { departmentName: { contains: "Information Technology", mode: "insensitive" } },
+    ],
+  };
+  if (normalizedDivision !== "ALL") where.AND = [divisionFilter(normalizedDivision)];
+  if (isLab) where.labBatch = normalizedBatch;
+  return where;
 }
 
 function yearLabel(year) {
@@ -124,7 +174,11 @@ function sessionInclude() {
         subject: { include: { department: true } },
       },
     },
-    records: true,
+    records: {
+      include: {
+        student: { include: { user: { select: { id: true, name: true, email: true } } } },
+      },
+    },
   };
 }
 
@@ -237,74 +291,25 @@ async function getAssignmentForFaculty(faculty, assignmentId) {
   return assignment;
 }
 
-function eligibleStudentWhere(assignment, division) {
-  const subject = assignment.subject;
-  const resolvedDivision = normalizeDivision(division) || assignment.division || null;
-
-  const studentFilter = {
-    enrollmentStatus: "ACTIVE",
-    academicYear: assignment.academicYear,
-    year: subject.year,
-    semester: subject.semester,
-    OR: [
-      { department: { code: IT_DEPARTMENT_CODE } },
-      { departmentCode: IT_DEPARTMENT_CODE },
-      { departmentName: { contains: "Information Technology", mode: "insensitive" } },
-    ],
-  };
-
-  if (resolvedDivision && resolvedDivision !== "ALL") {
-    studentFilter.division = resolvedDivision;
+async function listEligibleStudents(userId, { assignmentId, division, labBatch, sessionType, attendanceType }) {
+  if (isLabAttendance({ sessionType, attendanceType, labBatch }) && !labBatch) {
+    throw new AttendanceError("Select a lab batch before loading lab attendance");
   }
-
-  return {
-    subjectId: subject.id,
-    academicYear: assignment.academicYear,
-    status: "ACTIVE",
-    student: studentFilter,
-  };
+  return listClassStudents(userId, { assignmentId, division, labBatch, sessionType, attendanceType });
 }
 
-async function listEligibleStudents(userId, { assignmentId, division }) {
-  const faculty = await getFacultyContext(userId);
-  assertItFaculty(faculty);
-  const assignment = await getAssignmentForFaculty(faculty, assignmentId);
-
-  const enrollments = await prisma.studentSubjectEnrollment.findMany({
-    where: eligibleStudentWhere(assignment, division),
-    include: {
-      student: {
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-        },
-      },
-    },
-    orderBy: { student: { rollNo: "asc" } },
-  });
-
-  return {
-    assignment: mapAssignment(assignment),
-    students: enrollments.map((enrollment) => ({
-      id: enrollment.student.id,
-      userId: enrollment.student.userId,
-      name: enrollment.student.user?.name || "Unknown student",
-      rollNo: enrollment.student.rollNo != null ? enrollment.student.rollNo : "",
-      enrollmentNo: enrollment.student.enrollmentNo || "",
-      studentId: enrollment.student.studentId,
-      division: enrollment.student.division
-        ? String(enrollment.student.division).toUpperCase().startsWith("DIV")
-          ? enrollment.student.division
-          : `Div ${enrollment.student.division}`
-        : "",
-      rawDivision: enrollment.student.division,
-      year: enrollment.student.year,
-      semester: enrollment.student.semester,
-      academicYear: enrollment.student.academicYear,
-    })),
-  };
-}
-
-async function listClassStudents(userId, { year, semester, division, department, academicYear, assignmentId } = {}) {
+async function listClassStudents(userId, {
+  year,
+  semester,
+  division,
+  department,
+  academicYear,
+  assignmentId,
+  labBatch,
+  sessionType,
+  attendanceType,
+  allowAllDivisions = false,
+} = {}) {
   const faculty = await getFacultyContext(userId);
   assertItFaculty(faculty);
 
@@ -346,29 +351,22 @@ async function listClassStudents(userId, { year, semester, division, department,
     }
   }
 
-  const resolvedDivision = normalizeDivision(division);
+  if (!targetAssignment) {
+    throw new AttendanceError("Select one of your assigned classes before loading the roster");
+  }
+  if ((targetYear && targetYear !== targetAssignment.subject.year) ||
+      (targetSemester && targetSemester !== targetAssignment.subject.semester) ||
+      (targetAcademicYear && targetAcademicYear !== targetAssignment.academicYear)) {
+    throw new AttendanceError("The selected academic year or semester does not match this subject assignment", 403);
+  }
 
-  const studentFilter = {
-    enrollmentStatus: "ACTIVE",
-    OR: [
-      { department: { code: IT_DEPARTMENT_CODE } },
-      { departmentCode: IT_DEPARTMENT_CODE },
-      { departmentName: { contains: "Information Technology", mode: "insensitive" } },
-    ],
-  };
-
-  if (targetYear) {
-    studentFilter.year = targetYear;
-  }
-  if (targetSemester) {
-    studentFilter.semester = targetSemester;
-  }
-  if (targetAcademicYear) {
-    studentFilter.academicYear = targetAcademicYear;
-  }
-  if (resolvedDivision && resolvedDivision !== "ALL") {
-    studentFilter.division = resolvedDivision;
-  }
+  const studentFilter = buildRosterWhere(targetAssignment, {
+    division,
+    labBatch,
+    sessionType,
+    attendanceType,
+    allowAllDivisions,
+  });
 
   const students = await prisma.studentProfile.findMany({
     where: studentFilter,
@@ -398,6 +396,7 @@ async function listClassStudents(userId, { year, semester, division, department,
       year: s.year,
       semester: s.semester,
       academicYear: s.academicYear,
+      labBatch: s.labBatch || null,
       name: s.user?.name || "Unknown student",
       userId: s.userId,
       enrollmentNo: s.enrollmentNo || "",
@@ -420,6 +419,7 @@ function buildSessionPayload(session, extra = {}) {
     sessionDate: session.sessionDate,
     attendanceType: session.attendanceType,
     sessionType: session.sessionType,
+    labBatch: session.labBatch || null,
     lectureTime: session.lectureTime,
     status,
     persistedStatus: session.status,
@@ -434,17 +434,38 @@ function buildSessionPayload(session, extra = {}) {
   };
 }
 
-async function getEligibleCount(assignment, division) {
-  return prisma.studentSubjectEnrollment.count({
-    where: eligibleStudentWhere(assignment, division),
+function sessionRosterOptions(session) {
+  const legacyLabWithoutBatch = isLabAttendance(session) && !session.labBatch;
+  return {
+    assignmentId: session.assignmentId,
+    division: session.division,
+    labBatch: session.labBatch,
+    sessionType: legacyLabWithoutBatch ? "Lecture" : session.sessionType,
+    attendanceType: legacyLabWithoutBatch ? "Class Lecture" : session.attendanceType,
+    allowAllDivisions: normalizeDivision(session.division) === "ALL",
+  };
+}
+
+async function getEligibleCount(assignment, division, labBatch, sessionType, attendanceType, allowAllDivisions = false) {
+  return prisma.studentProfile.count({
+    where: buildRosterWhere(assignment, { division, labBatch, sessionType, attendanceType, allowAllDivisions }),
   });
 }
 
 async function getSessionStats(session) {
-  const total = await getEligibleCount(session.assignment, session.division);
+  const roster = sessionRosterOptions(session);
+  const currentTotal = await getEligibleCount(
+    session.assignment,
+    roster.division,
+    roster.labBatch,
+    roster.sessionType,
+    roster.attendanceType,
+    roster.allowAllDivisions
+  );
   const marked = session.records?.length
     ? session.records.length
     : await prisma.attendanceRecord.count({ where: { sessionId: session.id } });
+  const total = Math.max(currentTotal, marked);
   const present = (session.records || []).filter((record) => record.status === "PRESENT").length;
   const absent = (session.records || []).filter((record) => record.status === "ABSENT").length;
 
@@ -462,7 +483,26 @@ async function createSession(userId, payload) {
   assertItFaculty(faculty);
 
   const assignment = await getAssignmentForFaculty(faculty, payload.assignmentId);
-  const division = normalizeDivision(payload.division) || assignment.division || "ALL";
+  const division = normalizeDivision(payload.division) || normalizeDivision(assignment.division) || "ALL";
+  const isLab = isLabAttendance(payload);
+  const attendanceType = String(payload.attendanceType || (isLab ? "Lab Session" : "Class Lecture")).trim();
+  const sessionType = String(payload.sessionType || (isLab ? "Lab Session" : "Lecture")).trim();
+  const labBatch = isLab ? String(payload.labBatch || "").trim().toUpperCase() : null;
+
+  if (!["A", "B"].includes(division)) {
+    throw new AttendanceError("Select Division A or Division B before starting attendance");
+  }
+  buildRosterWhere(assignment, { division, labBatch, sessionType, attendanceType });
+
+  const eligibleCount = await getEligibleCount(assignment, division, labBatch, sessionType, attendanceType);
+  if (eligibleCount === 0) {
+    if (isLab) {
+      throw new AttendanceError(
+        `No students are currently allocated to ${labBatch} in Division ${division}. Allocate students to this lab batch before starting attendance.`
+      );
+    }
+    throw new AttendanceError("No eligible students were found for the selected class");
+  }
 
   const sessionDate = parseSessionDate(payload.date);
   const windowDurationSeconds = DEFAULT_WINDOW_SECONDS;
@@ -471,6 +511,9 @@ async function createSession(userId, payload) {
     where: {
       assignmentId: assignment.id,
       division,
+      labBatch,
+      attendanceType,
+      sessionType,
       sessionDate,
       status: "ACTIVE",
       expiresAt: { gt: new Date() },
@@ -490,6 +533,9 @@ async function createSession(userId, payload) {
     where: {
       assignmentId: assignment.id,
       division,
+      labBatch,
+      attendanceType,
+      sessionType,
       sessionDate,
       status: "NOT_STARTED",
     },
@@ -500,11 +546,7 @@ async function createSession(userId, payload) {
   if (existingOpen) {
     const updated = await prisma.attendanceSession.update({
       where: { id: existingOpen.id },
-      data: {
-        attendanceType: payload.attendanceType || existingOpen.attendanceType,
-        sessionType: payload.sessionType || existingOpen.sessionType,
-        lectureTime: payload.lectureTime || existingOpen.lectureTime,
-      },
+      data: { lectureTime: payload.lectureTime || existingOpen.lectureTime },
       include: sessionInclude(),
     });
     return buildSessionPayload(updated, { stats: await getSessionStats(updated) });
@@ -516,10 +558,11 @@ async function createSession(userId, payload) {
       academicYear: assignment.academicYear,
       year: assignment.subject.year,
       division,
+      labBatch,
       sessionDate,
       status: "NOT_STARTED",
-      attendanceType: payload.attendanceType || null,
-      sessionType: payload.sessionType || null,
+      attendanceType,
+      sessionType,
       lectureTime: payload.lectureTime || null,
       windowDurationSeconds,
     },
@@ -541,6 +584,28 @@ async function startSession(userId, sessionId) {
 
   if (session.status === "ACTIVE" && !isExpired(session, now)) {
     return buildSessionPayload(session, { stats: await getSessionStats(session) });
+  }
+
+  const sessionIsLab = isLabAttendance(session);
+  if (sessionIsLab && !session.labBatch) {
+    throw new AttendanceError("This lab session has no saved lab batch and cannot be started", 409);
+  }
+  const roster = sessionRosterOptions(session);
+  const eligibleCount = await getEligibleCount(
+    session.assignment,
+    roster.division,
+    roster.labBatch,
+    roster.sessionType,
+    roster.attendanceType,
+    roster.allowAllDivisions
+  );
+  if (eligibleCount === 0) {
+    if (sessionIsLab) {
+      throw new AttendanceError(
+        `No students are currently allocated to ${session.labBatch} in Division ${normalizeDivision(session.division)}. Allocate students to this lab batch before starting attendance.`
+      );
+    }
+    throw new AttendanceError("No eligible students were found for the selected class");
   }
 
   const otherActive = await prisma.attendanceSession.findFirst({
@@ -601,10 +666,35 @@ async function getSessionStudents(userId, sessionId) {
   const faculty = await getFacultyContext(userId);
   assertItFaculty(faculty);
   const session = await getOwnedSession(sessionId, faculty.id);
-  const { students } = await listEligibleStudents(userId, {
-    assignmentId: session.assignmentId,
-    division: session.division,
-  });
+  const roster = sessionRosterOptions(session);
+  const { students: eligibleStudents } = await listClassStudents(userId, roster);
+  const studentsById = new Map(
+    eligibleStudents.map((student) => [student.id, { ...student, eligible: true }])
+  );
+  for (const record of session.records || []) {
+    const student = record.student;
+    if (!student || studentsById.has(student.id)) continue;
+    studentsById.set(student.id, {
+      id: student.id,
+      studentId: student.studentId,
+      rollNo: student.rollNo != null ? student.rollNo : "",
+      division: student.division
+        ? String(student.division).toUpperCase().startsWith("DIV")
+          ? student.division
+          : `Div ${normalizeDivision(student.division)}`
+        : "",
+      rawDivision: student.division,
+      year: student.year,
+      semester: student.semester,
+      academicYear: student.academicYear,
+      labBatch: student.labBatch || null,
+      eligible: false,
+      name: student.user?.name || "Unknown student",
+      userId: student.userId,
+      enrollmentNo: student.enrollmentNo || "",
+    });
+  }
+  const students = [...studentsById.values()].sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
 
   const recordsByStudent = new Map((session.records || []).map((record) => [record.studentId, record]));
 
@@ -643,11 +733,14 @@ async function saveRecords(userId, sessionId, records) {
     throw new AttendanceError("At least one attendance record is required");
   }
 
-  const { students } = await listEligibleStudents(userId, {
-    assignmentId: session.assignmentId,
-    division: session.division,
-  });
+  const roster = sessionRosterOptions(session);
+  const { students } = await listClassStudents(userId, roster);
   const eligibleIds = new Set(students.map((student) => student.id));
+
+  const requestedIds = records.map((record) => parseInt(record.studentId, 10));
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    throw new AttendanceError("Duplicate students were included in this attendance submission");
+  }
 
   const payload = records.map((record) => {
     const studentId = parseInt(record.studentId, 10);
@@ -720,7 +813,9 @@ function matchesHistoryFilters(session, filters) {
     if (subjectName !== filters.subject) return false;
   }
   if (filters.batch && filters.batch !== "All") {
-    const batch = session.assignment?.batchLabel || "";
+    const batch = session.labBatch
+      ? `${session.assignment?.batchLabel || ""} • ${session.labBatch}`
+      : session.assignment?.batchLabel || "";
     if (batch !== filters.batch) return false;
   }
   return true;
@@ -760,12 +855,15 @@ async function listHistory(userId, filters = {}) {
       date: session.sessionDate,
       type: session.sessionType || session.attendanceType || "Lecture",
       subject: mapped.assignment?.subjectName || "",
-      batch: mapped.assignment?.batchLabel || `${mapped.year} ${mapped.division}`,
+      batch: session.labBatch
+        ? `${mapped.assignment?.batchLabel || `${mapped.year} ${mapped.division}`} • ${session.labBatch}`
+        : mapped.assignment?.batchLabel || `${mapped.year} ${mapped.division}`,
       time: session.lectureTime || "",
       status: mapped.status,
       academicYear: session.academicYear,
       semester: mapped.assignment?.semester,
       division: session.division,
+      labBatch: session.labBatch || null,
       total: stats.total,
       present: stats.present,
       absent: stats.absent,

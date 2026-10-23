@@ -11,6 +11,10 @@ router.use(authenticate, requireApproved, authorize("COORDINATOR"));
 // Dashboard stats
 router.get("/dashboard", coordinatorController.getDashboard);
 
+// Lab batch allocation and coordinator adjustments
+router.get("/student-batches", coordinatorController.listStudentBatches);
+router.patch("/student-batches/:id", coordinatorController.updateStudentBatch);
+
 // Pending students
 router.get("/pending-students", coordinatorController.listPendingStudents);
 
