@@ -1,3 +1,4 @@
+import { formatFacultyName } from '../../utils/facultyDisplayName';
 import { useNavigate } from 'react-router-dom';
 import { UserCircleIcon, EnvelopeIcon, IdentificationIcon } from '@heroicons/react/24/outline';
 import useAuth from '../../hooks/useAuth';
@@ -17,7 +18,7 @@ const FacultyProfileCard = () => {
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-700 text-2xl font-bold text-white">
           {initial}
         </div>
-        <p className="mt-3 text-base font-bold text-slate-900">Prof. {user?.name ?? '—'}</p>
+        <p className="mt-3 text-base font-bold text-slate-900">{formatFacultyName(user?.name)}</p>
         {(user?.department || user?.profile?.departmentName) && (
           <p className="mt-0.5 text-xs text-slate-500">
             {user?.department || user?.profile?.departmentName}

@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { classifyFaculty, facultyClassificationWhere } = require("../config/facultyClassification");
 const userService = require("../services/user.service");
 const { sanitizeUser } = require("../utils/userHelpers");
 
@@ -63,10 +64,13 @@ exports.createFaculty = async (req, res, next) => {
 // ─── List Faculty ─────────────────────────────────────────────────────────────
 exports.listFaculty = async (req, res, next) => {
   try {
-    const { department, page = 1, limit = 50 } = req.query;
+    const { department, page = 1, limit = 50, classification = "current" } = req.query;
+    if (!["current", "historical", "all"].includes(classification)) {
+      return res.status(400).json({ success: false, message: "Invalid faculty classification" });
+    }
 
-    const where = {};
-    if (department) where.departmentCode = department.toUpperCase();
+    const where = facultyClassificationWhere(classification);
+    if (department) where.department = { code: department.toUpperCase() };
 
     const [faculty, total] = await Promise.all([
       prisma.facultyProfile.findMany({
@@ -84,7 +88,7 @@ exports.listFaculty = async (req, res, next) => {
       prisma.facultyProfile.count({ where }),
     ]);
 
-    return res.json({ success: true, total, faculty });
+    return res.json({ success: true, total, faculty: faculty.map((item) => ({ ...item, classification: classifyFaculty(item.employeeId) })) });
   } catch (error) {
     next(error);
   }
@@ -384,15 +388,19 @@ exports.getMyDashboard = async (req, res, next) => {
     const divisions = Array.from(new Set(assignments.map((a) => a.division).filter(Boolean)));
     const academicYears = Array.from(new Set(assignments.map((a) => a.academicYear).filter(Boolean)));
 
+    const pendingAttendance = await prisma.attendanceSession.count({
+      where: { assignment: { facultyId: faculty.id }, status: "ACTIVE", expiresAt: { gt: new Date() } },
+    });
     return res.json({
       success: true,
-      todayClasses: assignments.length,
-      pendingAttendance: 1,
-      leaveRequests: 0,
-      upcomingEvents: 2,
+      todayClasses: null,
+      scheduleAvailable: false,
+      pendingAttendance,
+      leaveRequests: null,
+      upcomingEvents: null,
       totalSubjects: assignments.length,
-      assignedDivisions: divisions.join(", ") || "All Divisions",
-      academicYear: academicYears[0] || "2025-26",
+      assignedDivisions: divisions.join(", ") || "Not confirmed",
+      academicYear: academicYears.join(", ") || null,
       assignments: assignments.map((assignment) => ({
         id: assignment.id,
         academicYear: assignment.academicYear,
@@ -430,34 +438,9 @@ exports.getMyTodayClasses = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
 
-    const times = [
-      { start: "10:00 AM", end: "11:00 AM" },
-      { start: "11:30 AM", end: "01:00 PM" },
-      { start: "02:00 PM", end: "03:00 PM" },
-      { start: "03:15 PM", end: "04:15 PM" },
-    ];
-    const rooms = ["LH-301", "Lab 2", "LH-302", "LH-305"];
-    const statuses = ["UPCOMING", "PENDING", "COMPLETED", "UPCOMING"];
+    // Teaching assignments are not timetable records. No schedule model exists.
+    return res.json({ success: true, classes: [], scheduleAvailable: false });
 
-    const classes = (faculty.subjectAssignments || []).map((assignment, idx) => {
-      const sub = assignment.subject;
-      const t = times[idx] || { start: "10:00 AM", end: "11:00 AM" };
-      return {
-        id: assignment.id,
-        subject: `${sub.subjectCode} - ${sub.subjectName}`,
-        subjectCode: sub.subjectCode,
-        startTime: t.start,
-        endTime: t.end,
-        className: `${sub.departmentCode || faculty.department?.code || "IT"} Engineering`,
-        semester: `Semester ${sub.semester}`,
-        division: `Division ${assignment.division || "A"}`,
-        room: rooms[idx] || (sub.subjectType === "PRACTICAL" ? "Lab 2" : "LH-301"),
-        attendanceStatus: statuses[idx] || "UPCOMING",
-        academicYear: assignment.academicYear,
-      };
-    });
-
-    return res.json({ success: true, classes });
   } catch (error) {
     next(error);
   }
@@ -479,26 +462,8 @@ exports.getMyTodaySchedule = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
 
-    const times = [
-      { start: "10:00 AM", end: "11:00 AM" },
-      { start: "11:30 AM", end: "01:00 PM" },
-      { start: "02:00 PM", end: "03:00 PM" },
-    ];
+    return res.json({ success: true, schedule: [], scheduleAvailable: false });
 
-    const schedule = (faculty.subjectAssignments || []).map((assignment, idx) => {
-      const sub = assignment.subject;
-      const t = times[idx] || { start: "10:00 AM", end: "11:00 AM" };
-      return {
-        startTime: t.start,
-        endTime: t.end,
-        subject: sub.subjectName,
-        classGroup: `${sub.year || "TY"} Div ${assignment.division || "A"} (Sem ${sub.semester})`,
-        room: sub.subjectType === "PRACTICAL" ? "Lab 2" : "LH-301",
-        status: idx === 0 ? "Upcoming" : "Upcoming",
-      };
-    });
-
-    return res.json({ success: true, schedule });
   } catch (error) {
     next(error);
   }
@@ -507,23 +472,8 @@ exports.getMyTodaySchedule = async (req, res, next) => {
 // ─── Get Current Authenticated Faculty Notifications ─────────────────────────
 exports.getMyNotifications = async (req, res, next) => {
   try {
-    const notifications = [
-      {
-        id: "notif-1",
-        title: "Mid-Term Exam Evaluation Schedule",
-        body: "All department faculty must submit mid-term evaluation rubrics by Friday.",
-        createdAt: "2 hours ago",
-        unread: true,
-      },
-      {
-        id: "notif-2",
-        title: "Department Meeting Notice",
-        body: "HOD convened an academic audit meeting for upcoming NBA accreditation.",
-        createdAt: "Yesterday",
-        unread: false,
-      },
-    ];
-    return res.json({ success: true, notifications });
+    return res.json({ success: true, notifications: [], notificationsAvailable: false });
+
   } catch (error) {
     next(error);
   }
@@ -545,26 +495,35 @@ exports.getMyAttendanceSummary = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
 
-    const classes = (faculty.subjectAssignments || []).map((a) => {
-      const sub = a.subject;
-      return {
-        id: a.id,
-        subject: sub.subjectName,
-        subjectCode: sub.subjectCode,
-        batch: `${sub.year || "TY"} Div ${a.division || "A"}`,
-        totalStudents: 60,
-        presentCount: 54,
-        attendanceRate: 90,
-      };
+    // Session dates are grouped by the college's Asia/Kolkata calendar day.
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+    const start = new Date(today + "T00:00:00+05:30");
+    const end = new Date(start.getTime() + 86400000);
+    const sessions = await prisma.attendanceSession.findMany({
+      where: { assignment: { facultyId: faculty.id }, sessionDate: { gte: start, lt: end },
+        status: { in: ["ACTIVE", "COMPLETED"] } },
+      include: { assignment: { include: { subject: true } },
+        records: { select: { status: true } } },
+      orderBy: { sessionDate: "asc" },
     });
+    const classes = sessions.map((session) => ({
+      id: session.id,
+      subject: session.assignment.subject.subjectName,
+      classGroup: session.division ? "Division " + session.division : "Division not confirmed",
+      status: session.records.length ? "SUBMITTED" : "PENDING",
+      present: session.records.filter((record) => record.status === "PRESENT").length,
+      total: session.records.length,
+    }));
+    const submitted = classes.filter((item) => item.status === "SUBMITTED").length;
+    const total = classes.reduce((sum, item) => sum + item.total, 0);
+    const present = classes.reduce((sum, item) => sum + item.present, 0);
+    return res.json({ success: true, classes, summary: {
+      conducted: sessions.length, submitted, pending: sessions.length - submitted,
+      averagePct: total ? Math.round(present * 100 / total) : null,
+    } });
 
-    const summary = {
-      overallAttendance: 90,
-      totalClassesConducted: classes.length * 12,
-      pendingSubmissions: 1,
-    };
-
-    return res.json({ success: true, summary, classes });
   } catch (error) {
     next(error);
   }

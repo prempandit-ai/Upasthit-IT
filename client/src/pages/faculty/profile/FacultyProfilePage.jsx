@@ -1,3 +1,4 @@
+import { formatFacultyName } from '../../../utils/facultyDisplayName';
 import { useState, useEffect } from 'react';
 import useAuth from '../../../hooks/useAuth';
 import PageHeader from '../../../components/faculty/shared/PageHeader';
@@ -58,7 +59,7 @@ const FacultyProfilePage = () => {
             {name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Prof. {name}</h2>
+            <h2 className="text-xl font-bold text-slate-900">{formatFacultyName(name)}</h2>
             <p className="text-xs text-blue-700 font-medium">{designation}</p>
             <p className="text-xs text-slate-500 mt-0.5">{deptName}</p>
           </div>
