@@ -4,7 +4,6 @@ import {
   ClockIcon,
   UserGroupIcon,
   ClipboardDocumentCheckIcon,
-  PlusIcon,
   MagnifyingGlassIcon,
   EyeIcon,
   EllipsisVerticalIcon,
@@ -17,7 +16,6 @@ import {
 } from '@heroicons/react/24/outline';
 import PageHeader from '../../../components/faculty/shared/PageHeader';
 import StatusBadge from '../../../components/faculty/shared/StatusBadge';
-import Modal from '../../../components/faculty/shared/Modal';
 import { useToast } from '../../../context/ToastContext';
 
 const INITIAL_EVENTS = [
@@ -103,7 +101,7 @@ const UPCOMING_7_DAYS = [
   { name: 'NSS Blood Donation Drive', date: '12 Jun 2025 • 09:00 AM', participants: 120, icon: HeartIcon },
 ];
 
-const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
+const EventsPage = ({ defaultTab = 'All Events' }) => {
   const { showToast } = useToast();
 
   const [events, setEvents] = useState(INITIAL_EVENTS);
@@ -111,15 +109,6 @@ const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
   const [search, setSearch] = useState('');
   const [committeeFilter, setCommitteeFilter] = useState('All Committees');
   const [statusFilter, setStatusFilter] = useState('All Status');
-
-  // Create Event Modal
-  const [createModalOpen, setCreateModalOpen] = useState(defaultAction === 'create');
-  const [name, setName] = useState('');
-  const [desc, setDesc] = useState('');
-  const [committee, setCommittee] = useState('GITS Committee');
-  const [venue, setVenue] = useState('');
-  const [dateTime, setDateTime] = useState('');
-  const [expectedParticipants, setExpectedParticipants] = useState('50');
 
   const filteredEvents = useMemo(() => {
     return events.filter((ev) => {
@@ -133,30 +122,6 @@ const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
     });
   }, [events, tab, committeeFilter, statusFilter, search]);
 
-  const handleCreateEvent = (e) => {
-    e.preventDefault();
-    if (!name || !venue || !dateTime) {
-      showToast('Please fill all required fields', 'warning');
-      return;
-    }
-    const newEv = {
-      id: `ev-${Date.now()}`,
-      name,
-      description: desc || 'Campus event',
-      venue,
-      committee,
-      dateTime,
-      participants: parseInt(expectedParticipants, 10) || 0,
-      status: 'UPCOMING',
-      icon: SparklesIcon,
-    };
-    setEvents([newEv, ...events]);
-    setCreateModalOpen(false);
-    setName('');
-    setDesc('');
-    showToast('Event created successfully', 'success');
-  };
-
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
@@ -166,16 +131,6 @@ const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
           { label: 'Events' },
           { label: 'My Events' },
         ]}
-        actions={
-          <button
-            type="button"
-            onClick={() => setCreateModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition-colors"
-          >
-            <PlusIcon className="h-4 w-4" />
-            Create New Event
-          </button>
-        }
       />
 
       {/* ── 4 Top Stat Cards (Screenshot 5) ── */}
@@ -435,7 +390,6 @@ const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
           <h3 className="text-sm font-semibold text-slate-900 mb-3">Quick Actions</h3>
           <div className="space-y-2">
             {[
-              { label: 'Create New Event', desc: 'Organize a new event', action: () => setCreateModalOpen(true) },
               { label: 'Event Requests', desc: 'View & manage requests', action: () => showToast('Navigating to requests', 'info') },
               { label: 'Event Attendance', desc: 'Mark & view attendance', action: () => showToast('Navigating to event attendance', 'info') },
               { label: 'Event Reports', desc: 'Generate event reports', action: () => showToast('Generating event reports', 'info') },
@@ -456,104 +410,6 @@ const EventsPage = ({ defaultTab = 'All Events', defaultAction = null }) => {
           </div>
         </div>
       </div>
-
-      {/* ── Create Event Modal ── */}
-      <Modal
-        isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        title="Create New Campus Event"
-        footer={
-          <>
-            <button
-              type="button"
-              onClick={() => setCreateModalOpen(false)}
-              className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleCreateEvent}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
-            >
-              Publish Event
-            </button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateEvent} className="space-y-4 text-xs">
-          <div>
-            <label className="block font-medium text-slate-700 mb-1">Event Name *</label>
-            <input
-              type="text"
-              placeholder="e.g. AI & ML Technical Workshop"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Committee / Category</label>
-              <select
-                value={committee}
-                onChange={(e) => setCommittee(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-              >
-                <option>GITS Committee</option>
-                <option>E-Cell Events</option>
-                <option>NSS</option>
-                <option>Technical Seminars</option>
-                <option>Small Events</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Venue *</label>
-              <input
-                type="text"
-                placeholder="e.g. Seminar Hall"
-                value={venue}
-                onChange={(e) => setVenue(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Date &amp; Time *</label>
-              <input
-                type="text"
-                placeholder="e.g. 28 May 2025, 10:00 AM"
-                value={dateTime}
-                onChange={(e) => setDateTime(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Expected Participants</label>
-              <input
-                type="number"
-                value={expectedParticipants}
-                onChange={(e) => setExpectedParticipants(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-medium text-slate-700 mb-1">Description / Objectives</label>
-            <textarea
-              rows={3}
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder="Outline the event objectives, speaker details, and target audience..."
-              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800 focus:bg-white focus:outline-none"
-            />
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 };

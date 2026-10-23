@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { EyeIcon, EyeSlashIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { AcademicCapIcon as AcademicCapSolid } from "@heroicons/react/24/solid";
@@ -10,7 +10,7 @@ import { getDashboardPathForRole } from "../utils/roleRoutes";
 const DEMO_ACCOUNTS = [
   { role: "ADMIN", label: "Admin", email: "admin@upasthit.test", password: "Password123" },
   { role: "HOD", label: "HOD", email: "hod@upasthit.test", password: "Password123" },
-  { role: "COORDINATOR", label: "Coordinator", email: "coordinator@upasthit.test", password: "Password123" },
+  { role: "COORDINATOR", label: "Event Coordinator", email: "coordinator@upasthit.test", password: "Password123" },
   { role: "FACULTY", label: "Teacher", email: "faculty@upasthit.test", password: "Password123" },
   { role: "STUDENT", label: "Staff", email: "student@upasthit.test", password: "Password123" },
 ];

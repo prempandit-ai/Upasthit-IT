@@ -1,16 +1,29 @@
+import { useEffect, useState } from 'react';
+import { getTodaySchedule } from '../../../services/facultyService';
 import { useNavigate } from 'react-router-dom';
-import { CalendarDaysIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { PlusIcon } from '@heroicons/react/24/outline';
 import PageHeader from '../../../components/faculty/shared/PageHeader';
 import StatusBadge from '../../../components/faculty/shared/StatusBadge';
 
-const TODAY_CLASSES = [
-  { id: '1', time: '09:00 AM - 10:00 AM', subject: 'Data Structures', type: 'Lecture', batch: 'B.Tech CSE Sem 3', room: 'Room 305', status: 'Completed', present: 52, total: 58 },
-  { id: '2', time: '11:00 AM - 12:00 PM', subject: 'DBMS', type: 'Lecture', batch: 'B.Tech CSE Sem 3', room: 'Room 310', status: 'Ongoing', present: null, total: 58 },
-  { id: '3', time: '02:00 PM - 05:00 PM', subject: 'DBMS Lab', type: 'Lab', batch: 'B.Tech CSE Sem 3', room: 'Lab 1', status: 'Upcoming', present: null, total: 28 },
-];
+
 
 const TodaySchedule = () => {
   const navigate = useNavigate();
+  const [classes, setClasses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    getTodaySchedule().then(({ data }) => {
+      if (active) setClasses((data.schedule || []).map((item, index) => ({
+        ...item, id: item.id || index, time: [item.startTime, item.endTime].filter(Boolean).join(' - '),
+        batch: item.classGroup, type: item.type || '--',
+      })));
+    }).catch(() => { if (active) setError('Unable to load the timetable. Please try again.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
 
   return (
     <div className="space-y-6 pb-12">
@@ -36,15 +49,15 @@ const TodaySchedule = () => {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Classes Today</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">3</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1">Unavailable</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Lectures / Labs</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">2 / 1</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1">Unavailable</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-medium text-slate-500">Total Teaching Hours</p>
-          <p className="text-2xl font-bold text-blue-700 mt-1">5 Hrs</p>
+          <p className="text-2xl font-bold text-blue-700 mt-1">Unavailable</p>
         </div>
       </div>
 
@@ -64,7 +77,12 @@ const TodaySchedule = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {TODAY_CLASSES.map((c) => (
+              {(loading || error || classes.length === 0) && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  {loading ? 'Loading timetable...' : error || 'No timetable records are available. Teaching assignments do not define scheduled lectures.'}
+                </td></tr>
+              )}
+              {classes.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-4 py-3 font-mono font-medium text-slate-900 whitespace-nowrap">{c.time}</td>
                   <td className="px-4 py-3 font-semibold text-slate-900">{c.subject}</td>

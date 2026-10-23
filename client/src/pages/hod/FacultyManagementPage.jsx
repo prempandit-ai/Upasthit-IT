@@ -25,6 +25,9 @@ const FacultyManagementPage = () => {
   const dashboardPath = isAdmin ? '/dashboard/admin' : '/dashboard/hod';
   const pagePath = isAdmin ? '/dashboard/admin/faculty-subjects' : '/dashboard/hod/faculty';
   const [facultyList, setFacultyList] = useState([]);
+  const [directoryView, setDirectoryView] = useState('CURRENT');
+  const currentFaculty = facultyList.filter((item) => item.classification === 'CURRENT');
+  const directoryFaculty = facultyList.filter((item) => item.classification === directoryView);
   const [subjects, setSubjects] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [selectedFacultyId, setSelectedFacultyId] = useState('');
@@ -43,18 +46,19 @@ const FacultyManagementPage = () => {
     setPageError('');
     try {
       const [facultyResponse, subjectResponse] = await Promise.all([
-        getFacultyManagementList({ limit: 100 }),
+        getFacultyManagementList({ limit: 100, classification: 'all' }),
         getSubjectCatalog({ limit: 100 }),
       ]);
       const nextFaculty = facultyResponse.data?.faculty ?? [];
+      const assignable = nextFaculty.filter((item) => item.classification === 'CURRENT');
       const nextSubjects = subjectResponse.data?.subjects ?? [];
 
       setFacultyList(nextFaculty);
       setSubjects(nextSubjects);
       setSelectedFacultyId((current) =>
-        nextFaculty.some((faculty) => String(faculty.id) === current)
+        assignable.some((faculty) => String(faculty.id) === current)
           ? current
-          : String(nextFaculty[0]?.id ?? '')
+          : String(assignable[0]?.id ?? '')
       );
       setSelectedAcademicYear((current) =>
         nextSubjects.some((subject) => subject.academicYear === current)
@@ -207,11 +211,11 @@ const FacultyManagementPage = () => {
                   id="faculty-select"
                   value={selectedFacultyId}
                   onChange={(event) => setSelectedFacultyId(event.target.value)}
-                  disabled={!facultyList.length}
+                  disabled={!currentFaculty.length}
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500"
                 >
-                  {!facultyList.length && <option value="">No faculty records found</option>}
-                  {facultyList.map((faculty) => (
+                  {!currentFaculty.length && <option value="">No faculty records found</option>}
+                  {currentFaculty.map((faculty) => (
                     <option key={faculty.id} value={faculty.id}>
                       {faculty.employeeId} · {faculty.user?.name ?? 'Unnamed faculty'} · {faculty.user?.email ?? ''}
                     </option>
@@ -321,7 +325,7 @@ const FacultyManagementPage = () => {
                         </div>
                       </div>
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                        {assignment.division ? `Division ${assignment.division}` : 'All divisions'}
+                        {assignment.division ? `Division ${assignment.division}` : 'Division not confirmed'}
                       </span>
                     </div>
                   ))}
@@ -340,7 +344,16 @@ const FacultyManagementPage = () => {
                 <UserGroupIcon className="h-5 w-5 text-slate-500" />
                 <div>
                   <h2 className="text-sm font-bold text-slate-900">Faculty directory</h2>
-                  <p className="text-xs text-slate-500">{facultyList.length} records from the database</p>
+                  <div className="mt-2 flex gap-2" aria-label="Faculty directory views">
+                    {['CURRENT', 'HISTORICAL'].map((view) => (
+                      <button key={view} type="button" aria-pressed={directoryView === view}
+                        onClick={() => setDirectoryView(view)}
+                        className={directoryView === view ? 'rounded bg-blue-100 px-2 py-1 text-blue-800' : 'rounded bg-slate-100 px-2 py-1 text-slate-600'}>
+                        {view === 'CURRENT' ? 'Current Faculty' : 'Historical / Archived Faculty'}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500">{directoryFaculty.length} records from the database</p>
                 </div>
               </div>
               <div className="max-h-80 overflow-auto">
@@ -353,7 +366,7 @@ const FacultyManagementPage = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {facultyList.map((faculty) => (
+                    {directoryFaculty.map((faculty) => (
                       <tr key={faculty.id} className="text-slate-700">
                         <td className="px-5 py-3">
                           <p className="font-semibold text-slate-900">{faculty.user?.name}</p>

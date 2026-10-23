@@ -14,6 +14,7 @@ const facultyRoutes     = require("./src/routes/faculty.routes");
 const subjectRoutes     = require("./src/routes/subject.routes");
 const importRoutes      = require("./src/routes/import.routes");
 const attendanceRoutes  = require("./src/routes/attendance.routes");
+const eventRoutes       = require("./src/routes/events.routes");
 
 const { errorHandler, notFoundHandler } = require("./src/middleware/error.middleware");
 
@@ -78,6 +79,7 @@ app.use("/api/faculty",     facultyRoutes);
 app.use("/api/subjects",    subjectRoutes);
 app.use("/api/import",      importRoutes);
 app.use("/api/attendance",  attendanceRoutes);
+app.use("/api/events",      eventRoutes);
 
 // ─── Error Handlers ────────────────────────────────────────────────────────────
 app.use(notFoundHandler);

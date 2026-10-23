@@ -133,7 +133,7 @@ const CoordinatorSidebar = ({ open, onClose }) => {
                 UPASTHIT
               </p>
               <h1 className="text-sm font-extrabold tracking-tight text-slate-900 uppercase mt-0.5">
-                CO-ORDINATOR PORTAL
+                EVENT COORDINATOR PORTAL
               </h1>
             </div>
           </div>

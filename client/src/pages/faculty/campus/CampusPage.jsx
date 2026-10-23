@@ -1,3 +1,4 @@
+import { formatFacultyName } from '../../../utils/facultyDisplayName';
 import { useState, useMemo } from 'react';
 import {
   MegaphoneIcon,
@@ -137,7 +138,7 @@ const CampusPage = ({ defaultTab = 'general' }) => {
       excerpt: newContent.length > 80 ? `${newContent.substring(0, 80)}...` : newContent,
       category: newCategory,
       postedOn: 'Today',
-      postedBy: `Prof. ${user?.name || 'Faculty'}`,
+      postedBy: formatFacultyName(user?.name),
       status: newPinned ? 'PINNED' : 'PUBLISHED',
     };
     setAnnouncements([newEntry, ...announcements]);

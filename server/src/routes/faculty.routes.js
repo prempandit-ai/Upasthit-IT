@@ -1,5 +1,6 @@
 const express = require("express");
 const facultyController = require("../controllers/faculty.controller");
+const eventController = require("../controllers/event.controller");
 const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const requireApproved = require("../middleware/approval.middleware");
@@ -17,6 +18,11 @@ router.get("/today-classes", authorize("FACULTY"), facultyController.getMyTodayC
 router.get("/schedule/today", authorize("FACULTY"), facultyController.getMyTodaySchedule);
 router.get("/notifications", authorize("FACULTY"), facultyController.getMyNotifications);
 router.get("/attendance/summary", authorize("FACULTY"), facultyController.getMyAttendanceSummary);
+
+// Events (Faculty read-only viewing; creation restricted to Coordinator/HOD/Admin)
+router.get("/events/stats", authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"), eventController.getEventStats);
+router.get("/events", authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"), eventController.listEvents);
+router.post("/events", authorize("ADMIN", "HOD", "COORDINATOR"), eventController.createEvent);
 
 // List all faculty — Admin, HOD, Coordinator
 router.get("/", authorize("ADMIN", "HOD", "COORDINATOR"), facultyController.listFaculty);

@@ -1,3 +1,4 @@
+import { formatFacultyName } from '../../utils/facultyDisplayName';
 import useAuth from '../../hooks/useAuth';
 
 const WelcomeHeader = () => {
@@ -14,7 +15,7 @@ const WelcomeHeader = () => {
     <div className="mb-6">
       <p className="text-sm font-medium text-blue-700">{greeting}</p>
       <h1 className="mt-0.5 text-2xl font-bold text-slate-900 sm:text-3xl">
-        Welcome, Prof. {name}
+        Welcome, {formatFacultyName(name)}
       </h1>
       {dept && (
         <p className="mt-1 text-sm text-slate-500">{dept}</p>
