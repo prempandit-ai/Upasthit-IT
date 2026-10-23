@@ -94,9 +94,13 @@ exports.listFaculty = async (req, res, next) => {
 exports.getFaculty = async (req, res, next) => {
   try {
     const targetId = parseInt(req.params.id);
+    const roles = req.user.roles || [req.user.role];
+    const canManageFaculty = ["ADMIN", "HOD", "COORDINATOR"].some((role) =>
+      roles.includes(role)
+    );
 
     // If caller is FACULTY, ensure they can only access their own profile
-    if (req.user.role === "FACULTY") {
+    if (!canManageFaculty && roles.includes("FACULTY")) {
       const myProfile = await prisma.facultyProfile.findUnique({
         where: { userId: req.user.id },
       });
@@ -162,8 +166,34 @@ exports.updateFaculty = async (req, res, next) => {
 // ─── Assign Faculty to Subject ────────────────────────────────────────────────
 exports.assignSubject = async (req, res, next) => {
   try {
-    const facultyId = parseInt(req.params.id);
-    const { subjectId, academicYear, division } = req.body;
+    const facultyId = Number(req.params.id);
+    const subjectId = Number(req.body?.subjectId);
+    const academicYear =
+      typeof req.body?.academicYear === "string"
+        ? req.body.academicYear.trim()
+        : "";
+    const rawDivision = req.body?.division;
+
+    if (!Number.isInteger(facultyId) || facultyId <= 0) {
+      return res.status(400).json({ success: false, message: "A valid faculty ID is required" });
+    }
+    if (!Number.isInteger(subjectId) || subjectId <= 0) {
+      return res.status(400).json({ success: false, message: "A valid subject ID is required" });
+    }
+    if (!academicYear) {
+      return res.status(400).json({ success: false, message: "Academic year is required" });
+    }
+
+    let division = null;
+    if (rawDivision !== null && rawDivision !== undefined && rawDivision !== "") {
+      if (typeof rawDivision !== "string") {
+        return res.status(400).json({ success: false, message: "Division must be a letter such as A or B" });
+      }
+      division = rawDivision.trim().toUpperCase();
+      if (!/^[A-Z]$/.test(division)) {
+        return res.status(400).json({ success: false, message: "Division must be a letter such as A or B" });
+      }
+    }
 
     // Validate faculty exists
     const faculty = await prisma.facultyProfile.findUnique({ where: { id: facultyId } });
@@ -172,27 +202,58 @@ exports.assignSubject = async (req, res, next) => {
     }
 
     // Validate subject exists
-    const subject = await prisma.subject.findUnique({ where: { id: parseInt(subjectId) } });
+    const subject = await prisma.subject.findUnique({ where: { id: subjectId } });
     if (!subject) {
       return res.status(404).json({ success: false, message: "Subject not found" });
     }
 
-    const assignment = await prisma.facultySubjectAssignment.create({
-      data: {
-        facultyId,
-        subjectId: parseInt(subjectId),
-        academicYear: academicYear.trim(),
-        division: division ? division.toUpperCase().trim() : null,
-      },
-      include: { subject: true },
-    });
+    if (academicYear !== subject.academicYear) {
+      return res.status(400).json({
+        success: false,
+        message: `Academic year must match the selected subject (${subject.academicYear})`,
+      });
+    }
 
-    return res.status(201).json({ success: true, assignment });
-  } catch (error) {
-    if (error.code === "P2002") {
+    // NULL divisions mean "all divisions" and are not considered equal by a
+    // PostgreSQL composite unique constraint. Check for overlapping scopes in
+    // a serializable transaction so repeated requests cannot create duplicates.
+    const assignment = await prisma.$transaction(async (tx) => {
+      const existingAssignments = await tx.facultySubjectAssignment.findMany({
+        where: { facultyId, subjectId, academicYear },
+        select: { id: true, division: true },
+      });
+      const overlapsExisting = existingAssignments.some(
+        (existing) =>
+          existing.division === null ||
+          division === null ||
+          existing.division === division
+      );
+
+      if (overlapsExisting) return null;
+
+      return tx.facultySubjectAssignment.create({
+        data: { facultyId, subjectId, academicYear, division },
+        include: { subject: true },
+      });
+    }, { isolationLevel: "Serializable" });
+
+    if (!assignment) {
       return res.status(409).json({
         success: false,
-        message: "Faculty is already assigned to this subject for this year/division",
+        message: "Faculty already has an overlapping assignment for this subject and academic year",
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Subject assigned successfully",
+      assignment,
+    });
+  } catch (error) {
+    if (error.code === "P2002" || error.code === "P2034") {
+      return res.status(409).json({
+        success: false,
+        message: "This subject assignment already exists or conflicts with another request",
       });
     }
     next(error);
@@ -219,8 +280,13 @@ exports.getAssignedSubjects = async (req, res, next) => {
     const { academicYear } = req.query;
     const facultyId = parseInt(req.params.id);
 
-    // If caller is FACULTY, ensure they can only access their own subjects
-    if (req.user.role === "FACULTY") {
+    const roles = req.user.roles || [req.user.role];
+    const canManageFaculty = ["ADMIN", "HOD", "COORDINATOR"].some((role) =>
+      roles.includes(role)
+    );
+
+    // Faculty-only users may view assignments for their own profile.
+    if (!canManageFaculty && roles.includes("FACULTY")) {
       const myProfile = await prisma.facultyProfile.findUnique({
         where: { userId: req.user.id },
       });
@@ -327,6 +393,20 @@ exports.getMyDashboard = async (req, res, next) => {
       totalSubjects: assignments.length,
       assignedDivisions: divisions.join(", ") || "All Divisions",
       academicYear: academicYears[0] || "2025-26",
+      assignments: assignments.map((assignment) => ({
+        id: assignment.id,
+        academicYear: assignment.academicYear,
+        division: assignment.division,
+        subject: {
+          id: assignment.subject.id,
+          subjectCode: assignment.subject.subjectCode,
+          subjectName: assignment.subject.subjectName,
+          subjectType: assignment.subject.subjectType,
+          semester: assignment.subject.semester,
+          year: assignment.subject.year,
+          departmentCode: assignment.subject.departmentCode,
+        },
+      })),
     });
   } catch (error) {
     next(error);

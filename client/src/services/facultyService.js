@@ -9,6 +9,14 @@ import api from './api';
 export const getFacultyProfile = () => api.get('/api/faculty/me');
 export const getFacultyDashboardStats = () => api.get('/api/faculty/dashboard');
 
+// HOD/Admin faculty and subject management
+export const getFacultyManagementList = (params = {}) => api.get('/api/faculty', { params });
+export const getSubjectCatalog = (params = {}) => api.get('/api/subjects', { params });
+export const getFacultySubjectAssignments = (facultyId) =>
+  api.get(`/api/faculty/${facultyId}/subjects`);
+export const assignSubjectToFaculty = (facultyId, payload) =>
+  api.post(`/api/faculty/${facultyId}/assign-subject`, payload);
+
 // ── Today's classes ───────────────────────────────────────────────────────────
 export const getTodayClasses = () => api.get('/api/faculty/today-classes');
 

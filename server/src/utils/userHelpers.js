@@ -1,4 +1,8 @@
 const sanitizeUser = (user) => {
+  const roles = new Set([user.role]);
+  if (user.facultyProfile) roles.add("FACULTY");
+  if (user.hodProfile) roles.add("HOD");
+
   const profile =
     user.studentProfile ||
     user.facultyProfile ||
@@ -12,12 +16,22 @@ const sanitizeUser = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    roles: [...roles],
     status: user.status,
     isActive: user.isActive,
     mustChangePassword: Boolean(user.mustChangePassword),
     profile,
     createdAt: user.createdAt,
   };
+
+  if (user.hodProfile) {
+    base.hodProfile = {
+      employeeId: user.hodProfile.employeeId,
+      departmentName:
+        user.hodProfile.department?.name || user.hodProfile.departmentName,
+      departmentCode: user.hodProfile.department?.code || null,
+    };
+  }
 
   if (user.facultyProfile) {
     base.employeeId = user.facultyProfile.employeeId;

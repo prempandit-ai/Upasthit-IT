@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import FacultySidebar from '../components/faculty/FacultySidebar';
 import FacultyNavbar from '../components/faculty/FacultyNavbar';
+import DashboardRoleTabs from '../components/DashboardRoleTabs';
 
 /**
  * FacultyLayout
@@ -26,6 +27,7 @@ const FacultyLayout = () => {
         {/* Scrollable page content */}
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+            <DashboardRoleTabs />
             <Outlet />
           </div>
         </main>

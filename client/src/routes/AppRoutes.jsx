@@ -233,6 +233,7 @@ const AppRoutes = () => {
 
           <Route element={<RoleRoute allowedRoles={["ADMIN"]} />}>
             <Route path="/dashboard/admin" element={<AdminDashboard />} />
+            <Route path="/dashboard/admin/faculty-subjects" element={<FacultyManagementPage />} />
           </Route>
 
           <Route element={<RoleRoute allowedRoles={["STUDENT"]} />}>

@@ -220,6 +220,7 @@ const FacultyDashboard = () => {
   const pendingCount = stats?.pendingAttendance ?? null;
   const leaveCount = stats?.leaveRequests ?? null;
   const eventsCount = stats?.upcomingEvents ?? null;
+  const assignedSubjects = Array.isArray(stats?.assignments) ? stats.assignments : [];
 
   return (
     <div className="space-y-6">
@@ -323,7 +324,46 @@ const FacultyDashboard = () => {
         )}
       </section>
 
-      {/* ── Quick Actions ── */}
+      {/* Assigned subjects are returned for the authenticated faculty account. */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Assigned Subjects</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Current teaching assignments</p>
+          </div>
+          {!statsLoading && !statsError && (
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+              {assignedSubjects.length}
+            </span>
+          )}
+        </div>
+        {statsLoading ? (
+          <Skeleton className="h-16" />
+        ) : statsError ? (
+          <p className="text-sm text-red-600">Assigned subjects could not be loaded. Retry the dashboard statistics above.</p>
+        ) : assignedSubjects.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {assignedSubjects.map((assignment) => (
+              <div key={assignment.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  {assignment.subject?.subjectCode} · {assignment.subject?.subjectName}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {assignment.subject?.year} · Semester {assignment.subject?.semester} · {assignment.academicYear}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {assignment.division ? `Division ${assignment.division}` : 'All divisions'}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            No subjects have been assigned to your faculty profile yet.
+          </p>
+        )}
+      </section>
+
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
           Quick Actions

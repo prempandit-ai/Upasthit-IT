@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import HODSidebar from '../components/hod/HODSidebar';
 import HODNavbar from '../components/hod/HODNavbar';
+import DashboardRoleTabs from '../components/DashboardRoleTabs';
 
 /**
  * HODLayout
@@ -26,6 +27,7 @@ const HODLayout = () => {
         {/* Scrollable Page Body */}
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+            <DashboardRoleTabs />
             <Outlet />
           </div>
 

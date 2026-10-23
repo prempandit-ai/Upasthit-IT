@@ -7,7 +7,11 @@ const authorize = (...roles) => {
       });
     }
 
-    if (!roles.includes(req.user.role)) {
+    const userRoles = Array.isArray(req.user.roles)
+      ? req.user.roles
+      : [req.user.role];
+
+    if (!roles.some((role) => userRoles.includes(role))) {
       return res.status(403).json({
         success: false,
         message: "You do not have permission to access this resource",

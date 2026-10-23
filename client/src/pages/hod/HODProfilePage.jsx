@@ -5,6 +5,9 @@ import { UserCircleIcon, EnvelopeIcon, IdentificationIcon, BuildingOfficeIcon } 
 
 const HODProfilePage = () => {
   const { user } = useAuth();
+  const departmentName =
+    user?.hodProfile?.departmentName || user?.department || 'Department information unavailable';
+  const employeeId = user?.hodProfile?.employeeId || user?.employeeId || 'Not assigned';
 
   return (
     <div className="space-y-6">
@@ -24,7 +27,7 @@ const HODProfilePage = () => {
           <div>
             <h2 className="text-xl font-bold text-slate-900">{user?.name || 'Head of Department'}</h2>
             <p className="text-xs font-semibold text-blue-700">Head of Department</p>
-            <p className="mt-0.5 text-xs text-slate-500">Computer Engineering Department</p>
+            <p className="mt-0.5 text-xs text-slate-500">{departmentName}</p>
           </div>
         </div>
 
@@ -33,7 +36,7 @@ const HODProfilePage = () => {
             <IdentificationIcon className="h-5 w-5 text-slate-400" />
             <div>
               <p className="font-semibold text-slate-900">Employee ID</p>
-              <p className="text-slate-500 font-mono">HOD-CSE-001</p>
+              <p className="text-slate-500 font-mono">{employeeId}</p>
             </div>
           </div>
 
@@ -49,7 +52,7 @@ const HODProfilePage = () => {
             <BuildingOfficeIcon className="h-5 w-5 text-slate-400" />
             <div>
               <p className="font-semibold text-slate-900">Department</p>
-              <p className="text-slate-500">Computer Engineering</p>
+              <p className="text-slate-500">{departmentName}</p>
             </div>
           </div>
 
@@ -57,7 +60,9 @@ const HODProfilePage = () => {
             <UserCircleIcon className="h-5 w-5 text-slate-400" />
             <div>
               <p className="font-semibold text-slate-900">System Role</p>
-              <p className="text-slate-500 font-mono">HOD (Department Administrator)</p>
+              <p className="text-slate-500 font-mono">
+                {user?.roles?.includes('FACULTY') ? 'HOD and Faculty' : 'HOD (Department Administrator)'}
+              </p>
             </div>
           </div>
         </div>

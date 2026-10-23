@@ -33,6 +33,8 @@ module.exports = async (req, res, next) => {
         status: true,
         tokenVersion: true,
         mustChangePassword: true,
+        facultyProfile: { select: { id: true } },
+        hodProfile: { select: { id: true } },
       },
     });
 
@@ -60,8 +62,14 @@ module.exports = async (req, res, next) => {
       });
     }
 
+    const roles = new Set([dbUser.role]);
+    if (dbUser.facultyProfile) roles.add("FACULTY");
+    if (dbUser.hodProfile) roles.add("HOD");
+
     req.user = {
       ...decoded,
+      role: dbUser.role,
+      roles: [...roles],
       status: dbUser.status,
       mustChangePassword: dbUser.mustChangePassword,
       tokenVersion: dbUser.tokenVersion,

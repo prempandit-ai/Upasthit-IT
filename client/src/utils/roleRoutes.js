@@ -22,6 +22,7 @@ export const ROLE_NAV_ITEMS = {
     { label: "User Management", href: "#users" },
     { label: "Create HOD", href: "#create-hod" },
     { label: "Create Faculty", href: "#create-faculty" },
+    { label: "Faculty & Subject Assignments", href: "/dashboard/admin/faculty-subjects" },
   ],
   STUDENT: [
     { label: "Attendance", href: "#attendance" },

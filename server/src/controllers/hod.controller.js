@@ -14,11 +14,17 @@ exports.getDepartmentOverview = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "HOD profile not found" });
     }
 
-    const deptCode = hodProfile.departmentCode;
+    const deptCode = hodProfile.department?.code;
+    if (!deptCode) {
+      return res.status(422).json({
+        success: false,
+        message: "HOD profile must be linked to a department",
+      });
+    }
 
     const [studentCount, facultyCount, subjectCount, pendingFaculty] = await Promise.all([
       prisma.studentProfile.count({ where: { departmentCode: deptCode } }),
-      prisma.facultyProfile.count({ where: { departmentCode: deptCode } }),
+      prisma.facultyProfile.count({ where: { department: { code: deptCode } } }),
       prisma.subject.count({ where: { departmentCode: deptCode } }),
       prisma.user.findMany({
         where: { role: "FACULTY", status: "PENDING" },
@@ -42,14 +48,23 @@ exports.listDepartmentFaculty = async (req, res, next) => {
   try {
     const hodProfile = await prisma.hODProfile.findUnique({
       where: { userId: req.user.id },
+      include: { department: true },
     });
 
     if (!hodProfile) {
       return res.status(404).json({ success: false, message: "HOD profile not found" });
     }
 
+    const departmentCode = hodProfile.department?.code;
+    if (!departmentCode) {
+      return res.status(422).json({
+        success: false,
+        message: "HOD profile must be linked to a department",
+      });
+    }
+
     const faculty = await prisma.facultyProfile.findMany({
-      where: { departmentCode: hodProfile.departmentCode },
+      where: { department: { code: departmentCode } },
       include: {
         user: { select: { id: true, name: true, email: true, status: true, isActive: true } },
         subjectAssignments: { include: { subject: true } },
@@ -67,21 +82,19 @@ exports.createHodProfile = async (req, res, next) => {
   try {
     const { userId, employeeId, departmentCode, departmentName } = req.body;
 
-    let departmentId = null;
+    let department = null;
     if (departmentCode) {
-      const dept = await prisma.department.findUnique({
+      department = await prisma.department.findUnique({
         where: { code: departmentCode.toUpperCase().trim() },
       });
-      if (dept) departmentId = dept.id;
     }
 
     const profile = await prisma.hODProfile.create({
       data: {
         userId,
         employeeId: employeeId.trim(),
-        departmentCode: (departmentCode || "").toUpperCase().trim(),
-        departmentName: (departmentName || "").trim(),
-        departmentId,
+        departmentName: department?.name || (departmentName || "").trim(),
+        departmentId: department?.id || null,
       },
     });
 

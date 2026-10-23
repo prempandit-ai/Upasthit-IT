@@ -125,7 +125,7 @@ const HODNavbar = ({ onToggleSidebar, pageTitle = 'Dashboard' }) => {
                 </p>
                 <p className="truncate text-[11px] text-slate-500">{user?.email}</p>
                 <span className="mt-1.5 inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-                  ROLE: {user?.role || 'HOD'}
+                  ROLE: {user?.roles?.includes('HOD') ? 'HOD' : user?.role || 'HOD'}
                 </span>
               </div>
 
