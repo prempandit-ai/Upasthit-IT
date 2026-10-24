@@ -32,7 +32,6 @@ import {
   storeAttendanceSessionId,
 } from '../../../services/facultyService';
 
-const IT_DEPARTMENT_LABEL = 'Information Technology (IT)';
 const EMPTY_ROSTER_MESSAGE =
   'No students found for the selected class. Student enrollment data may not be available yet.';
 const emptyLabRosterMessage = (batch, division) => {
@@ -40,11 +39,18 @@ const emptyLabRosterMessage = (batch, division) => {
     .replace(/^(section|division|div)\s*/i, '')
     .trim()
     .toUpperCase();
+  if (!batch) return `No enrolled students with saved lab-batch assignments were found in Division ${normalizedDivision}.`;
   return `No students are allocated to ${batch} in Division ${normalizedDivision}. Ask the coordinator to assign student lab batches before starting attendance.`;
 };
+const normalizeDivisionValue = (value) =>
+  String(value || '').replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
 const formatDivisionOption = (value) => {
-  const division = String(value || '').replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
-  return division === 'ALL' ? 'All Divisions' : division ? `Div ${division}` : '';
+  const division = normalizeDivisionValue(value);
+  return !division || division === 'ALL' ? 'All Divisions' : `Div ${division}`;
+};
+const LAB_BATCHES_BY_DIVISION = {
+  A: ['A1', 'A2', 'A3'],
+  B: ['B1', 'B2', 'B3'],
 };
 
 const formatTimer = (seconds) => {
@@ -83,7 +89,6 @@ const TakeAttendance = () => {
   const [assignmentsError, setAssignmentsError] = useState('');
 
   const [attendanceType, setAttendanceType] = useState('Class Lecture');
-  const [department] = useState(IT_DEPARTMENT_LABEL);
   const [batch, setBatch] = useState('');
   const [labBatch, setLabBatch] = useState('');
   const [subject, setSubject] = useState('');
@@ -97,6 +102,7 @@ const TakeAttendance = () => {
   const [starting, setStarting] = useState(false);
 
   const [students, setStudents] = useState([]);
+  const [availableDivisions, setAvailableDivisions] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState('');
   const rosterRequestId = useRef(0);
@@ -109,6 +115,8 @@ const TakeAttendance = () => {
   const [submitting, setSubmitting] = useState(false);
   const submissionLock = useRef(false);
   const lastSubmission = useRef('');
+  const [submissionConfirmedSessionId, setSubmissionConfirmedSessionId] = useState(null);
+  const [sessionStatusUnverified, setSessionStatusUnverified] = useState(false);
   const [focusedStudentId, setFocusedStudentId] = useState(null);
   const rowRefs = useRef(new Map());
 
@@ -121,17 +129,13 @@ const TakeAttendance = () => {
   const [approvals, setApprovals] = useState([]);
 
   const selectedAssignment = useMemo(() => {
-    const normalizedSection = section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
     return (
       assignments.find(
         (item) =>
           item.batchLabel === batch &&
           item.subjectName === subject &&
-          (item.sectionLabel === section ||
-            item.division === normalizedSection ||
-            (!item.division && (section === 'All Divisions' || section === 'All Sections' || !section)))
+          (!item.division || normalizeDivisionValue(item.division) === 'ALL' || normalizeDivisionValue(item.division) === normalizeDivisionValue(section))
       ) ||
-      assignments.find((item) => item.batchLabel === batch && item.subjectName === subject) ||
       null
     );
   }, [assignments, batch, subject, section]);
@@ -159,19 +163,34 @@ const TakeAttendance = () => {
     );
     if (matching.length === 0) return [];
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
-    if (explicitDivisions.length > 0) {
-      return Array.from(new Set(explicitDivisions
-        .map((d) => String(d).replace(/^(section|division|div)\s*/i, '').trim().toUpperCase())
-        .filter((d) => ['A', 'B'].includes(d))
-        .map((d) => `Div ${d}`)));
+    const hasAllDivisionsAssignment = matching.some((item) => !item.division || normalizeDivisionValue(item.division) === 'ALL');
+    if (explicitDivisions.length > 0 && !hasAllDivisionsAssignment) {
+      return Array.from(new Set(explicitDivisions.map(formatDivisionOption)));
     }
-    return ['Div A', 'Div B'];
-  }, [assignments, batch, subject]);
+    const divisions = Array.from(new Set([
+      'A',
+      'B',
+      ...explicitDivisions.map(normalizeDivisionValue),
+      ...availableDivisions.map(normalizeDivisionValue),
+    ].filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+    return ['All Divisions', ...divisions.map(formatDivisionOption)];
+  }, [assignments, availableDivisions, batch, subject]);
+
+  const labBatchOptions = useMemo(() => {
+    const selectedDivision = section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
+    if (!selectedDivision || selectedDivision === 'ALL') return [];
+    return Array.from(new Set([
+      ...(LAB_BATCHES_BY_DIVISION[selectedDivision] || []),
+      ...students.map((student) => String(student.labBatch || '').trim()).filter(Boolean),
+    ]))
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [section, students]);
 
   const sessionStatus = session?.status || 'NOT_STARTED';
   const sessionActive = sessionStatus === 'ACTIVE' && timeLeftSeconds > 0;
-  const selectionLocked = sessionStatus === 'ACTIVE' || starting || submitting;
-  const canMark = sessionActive && !studentsLoading && !submitting;
+  const selectionLocked = sessionStatus === 'ACTIVE' || starting || submitting || sessionStatusUnverified;
+  const canMark = sessionActive && !studentsLoading && !submitting && !sessionStatusUnverified;
   const canSubmit = canMark && students.some((student) => student.eligible !== false);
   const cannotStartEmptyLab = isLabSession && (!labBatch || studentsLoading || !students.some((student) => student.eligible !== false));
 
@@ -217,10 +236,16 @@ const TakeAttendance = () => {
       setSession(null);
       setTimeLeftSeconds(0);
       timeLeftRef.current = 0;
+      setSessionStatusUnverified(false);
+      setSubmissionConfirmedSessionId(null);
       storeAttendanceSessionId(null);
       return;
     }
     setSession(nextSession);
+    setSessionStatusUnverified(false);
+    setSubmissionConfirmedSessionId((current) =>
+      current === nextSession.id && nextSession.status === 'COMPLETED' ? current : null
+    );
     const remaining = remainingFromSession(nextSession);
     setTimeLeftSeconds(remaining);
     timeLeftRef.current = remaining;
@@ -251,13 +276,6 @@ const TakeAttendance = () => {
 
       return;
     }
-    if (type === 'Lab Session' && !selectedLabBatch) {
-      setStudents([]);
-      setStudentsLoading(false);
-      setStudentsError('Select a lab batch to load its assigned students.');
-
-      return;
-    }
     setStudents([]);
     setStudentsLoading(true);
     setStudentsError('');
@@ -277,6 +295,14 @@ const TakeAttendance = () => {
         }))
         .sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
       if (requestId !== rosterRequestId.current) return;
+      const normalizedDivision = String(division || assignment.division || 'ALL')
+        .replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
+      if (normalizedDivision === 'ALL') {
+        setAvailableDivisions(Array.from(new Set(roster
+          .map((student) => String(student.rawDivision || student.division || '')
+            .replace(/^(section|division|div)\s*/i, '').trim().toUpperCase())
+          .filter(Boolean))).sort((left, right) => left.localeCompare(right, undefined, { numeric: true })));
+      }
       setStudents(roster);
 
       if (roster.length === 0) {
@@ -343,7 +369,7 @@ const TakeAttendance = () => {
         if (!silent && data.session.assignment) {
           setBatch(data.session.assignment.batchLabel || '');
           setSubject(data.session.assignment.subjectName || '');
-          const currentDivision = data.session.division || data.session.assignment?.division || 'A';
+          const currentDivision = data.session.division || data.session.assignment?.division || 'All Divisions';
           setSection(formatDivisionOption(currentDivision));
           setLabBatch(data.session.labBatch || '');
           const currentType = data.session.attendanceType || (data.session.labBatch ? 'Lab Session' : 'Class Lecture');
@@ -382,7 +408,7 @@ const TakeAttendance = () => {
         if (nextAssignments[0]) {
           setBatch(nextAssignments[0].batchLabel);
           setSubject(nextAssignments[0].subjectName);
-          const initialDiv = formatDivisionOption(nextAssignments[0].division) || 'Div A';
+          const initialDiv = formatDivisionOption(nextAssignments[0].division) || 'All Divisions';
           setSection(initialDiv);
           if (nextAssignments[0].subjectType === 'PRACTICAL') {
             setAttendanceType('Lab Session');
@@ -492,7 +518,7 @@ const TakeAttendance = () => {
           loadHistory();
         }
       } catch {
-        if (!cancelled) applySession({ ...session, status: 'COMPLETED' });
+        if (!cancelled) setSessionStatusUnverified(true);
       }
     };
     finalize();
@@ -503,6 +529,7 @@ const TakeAttendance = () => {
 
   const handleBatchChange = (value) => {
     clearSelectionSession();
+    setAvailableDivisions([]);
     setBatch(value);
     setLabBatch('');
     const nextSubjects = assignments.filter((item) => item.batchLabel === value);
@@ -512,19 +539,20 @@ const TakeAttendance = () => {
       (item) => item.batchLabel === value && (!nextSubject || item.subjectName === nextSubject)
     );
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
-    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'Div A';
+    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'All Divisions';
     setSection(defaultSection);
   };
 
   const handleSubjectChange = (value) => {
     clearSelectionSession();
+    setAvailableDivisions([]);
     setSubject(value);
     setLabBatch('');
     const matching = assignments.filter(
       (item) => (!batch || item.batchLabel === batch) && item.subjectName === value
     );
     const explicitDivisions = matching.map((item) => item.division).filter(Boolean);
-    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'Div A';
+    const defaultSection = explicitDivisions.length > 0 ? formatDivisionOption(explicitDivisions[0]) : 'All Divisions';
     setSection(defaultSection);
   };
 
@@ -564,11 +592,12 @@ const TakeAttendance = () => {
       showToast('Select a valid assigned subject, batch, and class before starting attendance.', 'error');
       return;
     }
-    if (!['A', 'B'].includes(section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase())) {
-      showToast('Select Division A or Division B before starting attendance.', 'error');
+    const selectedDivision = section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase();
+    if (!selectedDivision || selectedDivision === 'ALL') {
+      showToast('Select a division before starting attendance.', 'error');
       return;
     }
-    if (isLabSession && !['A1', 'A2', 'A3', 'B1', 'B2', 'B3'].includes(labBatch)) {
+    if (isLabSession && !labBatch) {
       showToast('Select a lab batch before starting lab attendance.', 'error');
       return;
     }
@@ -680,17 +709,78 @@ const TakeAttendance = () => {
     setSubmitting(true);
     try {
       const { data } = await submitAttendance(session.id, { records });
+      if (data.session?.status !== 'COMPLETED') {
+        throw new Error('The server did not confirm that this attendance session was completed.');
+      }
       lastSubmission.current = signature;
-      if (data.session) applySession(data.session);
+      applySession(data.session);
+      setSubmissionConfirmedSessionId(data.session.id);
       dirtyStudentStatuses.current.clear();
       sessionRosterRequestId.current += 1;
       await loadSessionStudents(session.id, { silent: true });
+      await loadHistory({
+        type: historyFilterType,
+        subject: historyFilterSubject,
+        batch: historyFilterBatch,
+      });
       showToast('Attendance submitted successfully!', 'success');
     } catch (error) {
-      showToast(getAttendanceErrorMessage(error, 'Attendance was not saved. Please try again.'), 'error');
+      const submissionMessage = getAttendanceErrorMessage(error, 'Attendance was not saved. Please try again.');
+      try {
+        const { data } = await getAttendanceSession(session.id);
+        const latestSession = data?.session;
+        if (!latestSession) throw new Error('The server did not return the latest session status.');
+        applySession(latestSession);
+        if (latestSession.status === 'COMPLETED') {
+          const { data: rosterData } = await getAttendanceSessionStudents(session.id);
+          const savedStatuses = new Map((rosterData.students || []).map((student) => [student.id, student.status]));
+          const savedMarksMatch = records.every((record) => savedStatuses.get(record.studentId) === record.status);
+          if (!savedMarksMatch) {
+            await loadSessionStudents(session.id, { silent: true });
+            showToast('The server completed the session, but the saved marks could not be confirmed. Review Attendance History before retrying.', 'error');
+            return;
+          }
+          lastSubmission.current = signature;
+          setSubmissionConfirmedSessionId(latestSession.id);
+          dirtyStudentStatuses.current.clear();
+          sessionRosterRequestId.current += 1;
+          await loadSessionStudents(session.id, { silent: true });
+          await loadHistory({
+            type: historyFilterType,
+            subject: historyFilterSubject,
+            batch: historyFilterBatch,
+          });
+          showToast('Attendance was completed by the server. The saved session status has been confirmed.', 'success');
+        } else {
+          await loadSessionStudents(session.id, { silent: true, preserveVisibleRoster: true });
+          showToast(submissionMessage, 'error');
+        }
+      } catch {
+        setSessionStatusUnverified(true);
+        showToast(`${submissionMessage} The latest session status could not be verified. Check it before retrying.`, 'error');
+      }
     } finally {
       submissionLock.current = false;
       setSubmitting(false);
+    }
+  };
+
+  const handleRefreshSessionStatus = async () => {
+    if (!session?.id) return;
+    try {
+      const { data } = await getAttendanceSession(session.id);
+      if (!data?.session) throw new Error('The server did not return the latest session status.');
+      applySession(data.session);
+      await loadSessionStudents(session.id, { silent: true, preserveVisibleRoster: true });
+      await loadHistory({
+        type: historyFilterType,
+        subject: historyFilterSubject,
+        batch: historyFilterBatch,
+      });
+      showToast('Attendance session status refreshed.', 'success');
+    } catch (error) {
+      setSessionStatusUnverified(true);
+      showToast(getAttendanceErrorMessage(error, 'Unable to verify the attendance session status'), 'error');
     }
   };
 
@@ -723,7 +813,7 @@ const TakeAttendance = () => {
       if (data.session?.assignment) {
         setBatch(data.session.assignment.batchLabel || '');
         setSubject(data.session.assignment.subjectName || '');
-        const currentDivision = data.session.division || data.session.assignment.division || 'A';
+        const currentDivision = data.session.division || data.session.assignment.division || 'All Divisions';
         setSection(formatDivisionOption(currentDivision));
         setLabBatch(data.session.labBatch || '');
         setAttendanceType(/lab/i.test(data.session.attendanceType || data.session.sessionType || '') ? 'Lab Session' : 'Class Lecture');
@@ -756,8 +846,9 @@ const TakeAttendance = () => {
     }
   };
 
-  const windowTitle =
-    sessionStatus === 'ACTIVE'
+  const windowTitle = sessionStatusUnverified
+      ? 'Session Status Unverified'
+      : sessionStatus === 'ACTIVE'
       ? 'Attendance Window Active'
       : sessionStatus === 'COMPLETED' || sessionStatus === 'EXPIRED'
       ? 'Attendance Window Completed'
@@ -817,13 +908,11 @@ const TakeAttendance = () => {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Department</label>
-            <select
-              value={department}
-              disabled
+            <input
+              value={selectedAssignment?.departmentLabel || ''}
+              readOnly
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
-            >
-              <option>{IT_DEPARTMENT_LABEL}</option>
-            </select>
+            />
           </div>
 
           <div>
@@ -892,16 +981,11 @@ const TakeAttendance = () => {
               <select
                 value={labBatch}
                 onChange={(e) => handleLabBatchChange(e.target.value)}
-                disabled={selectionLocked}
+                disabled={selectionLocked || !labBatchOptions.length}
                 className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
               >
-                <option value="">Select lab batch</option>
-                {(section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase() === 'A'
-                  ? ['A1', 'A2', 'A3']
-                  : section.replace(/^(section|division|div)\s*/i, '').trim().toUpperCase() === 'B'
-                    ? ['B1', 'B2', 'B3']
-                    : []
-                ).map((option) => <option key={option} value={option}>{option}</option>)}
+                <option value="">{labBatchOptions.length ? 'Select lab batch' : 'No allocated lab batches'}</option>
+                {labBatchOptions.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             </div>
           )}
@@ -1007,13 +1091,31 @@ const TakeAttendance = () => {
         <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-2.5 text-xs text-blue-700 flex items-center gap-2">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white font-bold">i</span>
           <span>
-            {sessionActive && session?.joinCode
+            {sessionStatusUnverified
+              ? 'The server status could not be verified. Refresh it before making or submitting attendance changes.'
+              : sessionStatus === 'COMPLETED'
+              ? 'This attendance session is complete. Its student check-in code has been invalidated.'
+              : sessionActive && session?.joinCode
               ? 'Students can check in with the six-digit code during this five-minute window.'
               : sessionActive
               ? 'This active window has no check-in code and cannot accept student mobile check-ins.'
               : 'Start the five-minute window to issue a student mobile check-in code.'}
           </span>
         </div>
+        {sessionStatusUnverified ? (
+          <button
+            type="button"
+            onClick={handleRefreshSessionStatus}
+            className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800"
+          >
+            Refresh session status
+          </button>
+        ) : null}
+        {submissionConfirmedSessionId === session?.id && sessionStatus === 'COMPLETED' ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800" role="status">
+            Attendance Submitted Successfully. Present: {localStats.present}, Absent: {localStats.absent}, Unmarked: {localStats.missing}.
+          </div>
+        ) : null}
         {sessionActive && session?.joinCode ? (
           <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Student check-in code</span>
@@ -1162,7 +1264,7 @@ const TakeAttendance = () => {
             onClick={handleSubmitAttendance}
             className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition-colors disabled:opacity-60"
           >
-            {submitting ? 'Submitting...' : 'Submit Attendance'}
+            {submitting ? 'Submitting...' : submissionConfirmedSessionId === session?.id ? 'Attendance Submitted' : 'Submit Attendance'}
           </button>
         </div>
       </section>
