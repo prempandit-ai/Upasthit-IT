@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -128,12 +129,14 @@ function ProfileEditorField({
   onSave,
   saving,
   multiline = false,
+  placeholder,
 }: {
   label: string;
   value: string;
   onSave: (value: string) => void;
   saving: boolean;
   multiline?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
@@ -144,13 +147,153 @@ function ProfileEditorField({
         value={draft}
         onChangeText={setDraft}
         multiline={multiline}
-        placeholder={`Enter ${label.toLowerCase()}`}
+        placeholder={placeholder || `Enter ${label.toLowerCase()}`}
         placeholderTextColor="#94A3B8"
         style={[styles.profileEditInput, multiline && styles.profileEditMultiline]}
       />
       <Pressable disabled={saving || draft === value} onPress={() => onSave(draft.trim())} style={[styles.profileSaveButton, (saving || draft === value) && styles.profileSaveButtonDisabled]}>
         <ThemedText style={styles.profileSaveText}>Save</ThemedText>
       </Pressable>
+    </View>
+  );
+}
+
+const GENDER_OPTIONS = ['Male', 'Female', 'Other', 'Prefer not to say'] as const;
+const BLOOD_GROUP_OPTIONS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
+
+function ProfileRadioEditor({
+  label,
+  value,
+  options,
+  onSave,
+  saving,
+}: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onSave: (value: string) => void;
+  saving: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const unchanged = draft === value;
+
+  return (
+    <View style={styles.profileEditRow}>
+      <ThemedText style={styles.profileEditLabel}>{label}</ThemedText>
+      <View accessibilityRole="radiogroup" accessibilityLabel={`${label} options`} style={styles.profileRadioOptions}>
+        {options.map((option) => {
+          const checked = draft === option;
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="radio"
+              accessibilityLabel={`${label}, ${option}`}
+              accessibilityHint={`Select ${option}`}
+              accessibilityState={{ checked }}
+              onPress={() => setDraft(option)}
+              style={styles.profileRadioOption}>
+              <View style={[styles.profileRadioOuter, checked && styles.profileRadioOuterSelected]}>
+                {checked ? <View style={styles.profileRadioInner} /> : null}
+              </View>
+              <ThemedText style={styles.profileChoiceText}>{option}</ThemedText>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={saving || unchanged}
+        onPress={() => onSave(draft)}
+        style={[styles.profileSaveButton, (saving || unchanged) && styles.profileSaveButtonDisabled]}>
+        <ThemedText style={styles.profileSaveText}>Save</ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+function ProfileDropdownEditor({
+  label,
+  value,
+  placeholder,
+  options,
+  onSave,
+  saving,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: readonly string[];
+  onSave: (value: string) => void;
+  saving: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [open, setOpen] = useState(false);
+  useEffect(() => setDraft(value), [value]);
+  const unchanged = draft === value;
+  const validChoice = options.includes(draft);
+  const displayValue = draft || placeholder;
+
+  return (
+    <View style={styles.profileEditRow}>
+      <ThemedText style={styles.profileEditLabel}>{label}</ThemedText>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${displayValue}`}
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(true)}
+        style={styles.profileSelect}>
+        <ThemedText style={draft ? styles.profileSelectText : styles.profileSelectPlaceholder}>
+          {displayValue}
+        </ThemedText>
+        <Ionicons name="chevron-down" size={16} color="#64748B" />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        disabled={saving || unchanged || !validChoice}
+        onPress={() => onSave(draft)}
+        style={[styles.profileSaveButton, (saving || unchanged || !validChoice) && styles.profileSaveButtonDisabled]}>
+        <ThemedText style={styles.profileSaveText}>Save</ThemedText>
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={styles.profileModalBackdrop}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close blood group options"
+            style={StyleSheet.absoluteFill}
+            onPress={() => setOpen(false)}
+          />
+          <View style={styles.profileModalCard}>
+            <ThemedText style={styles.profileModalTitle}>{label}</ThemedText>
+            <ScrollView
+              accessibilityRole="radiogroup"
+              accessibilityLabel={`${label} options`}
+              style={styles.profileModalList}
+              keyboardShouldPersistTaps="handled">
+              {options.map((option) => {
+                const checked = draft === option;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${label}, ${option}`}
+                    accessibilityState={{ checked }}
+                    onPress={() => {
+                      setDraft(option);
+                      setOpen(false);
+                    }}
+                    style={styles.profileModalOption}>
+                    <ThemedText style={[styles.profileChoiceText, checked && styles.profileChoiceTextSelected]}>
+                      {option}
+                    </ThemedText>
+                    {checked ? <Ionicons name="checkmark" size={18} color={Navy.primary} /> : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -402,9 +545,9 @@ export default function ProfileScreen() {
                     <Section title="Personal Information">
                       <ProfileEditorField label="Name" value={profile?.name || ''} onSave={(name) => saveProfile({ name })} saving={savingProfile} />
                       <ProfileEditorField label="Phone" value={profile?.phone || profile?.mobileNumber || ''} onSave={(mobileNumber) => saveProfile({ mobileNumber })} saving={savingProfile} />
-                      <ProfileEditorField label="Gender" value={profile?.gender || ''} onSave={(gender) => saveProfile({ gender })} saving={savingProfile} />
-                      <ProfileEditorField label="Blood Group" value={profile?.bloodGroup || ''} onSave={(bloodGroup) => saveProfile({ bloodGroup })} saving={savingProfile} />
-                      <ProfileEditorField label="Nationality" value={profile?.nationality || ''} onSave={(nationality) => saveProfile({ nationality })} saving={savingProfile} />
+                      <ProfileRadioEditor label="Gender" value={profile?.gender || ''} options={GENDER_OPTIONS} onSave={(gender) => saveProfile({ gender })} saving={savingProfile} />
+                      <ProfileDropdownEditor label="Blood Group" value={profile?.bloodGroup || ''} placeholder="Select blood group" options={BLOOD_GROUP_OPTIONS} onSave={(bloodGroup) => saveProfile({ bloodGroup })} saving={savingProfile} />
+                      <ProfileEditorField label="Nationality" value={profile?.nationality || ''} onSave={(nationality) => saveProfile({ nationality })} saving={savingProfile} placeholder="e.g. Indian" />
                       <ProfileEditorField label="Father's Name" value={profile?.fatherName || ''} onSave={(fatherName) => saveProfile({ fatherName })} saving={savingProfile} />
                       <ProfileEditorField label="Mother's Name" value={profile?.motherName || ''} onSave={(motherName) => saveProfile({ motherName })} saving={savingProfile} />
                       <ProfileEditorField label="Address" value={profile?.address || ''} onSave={(address) => saveProfile({ address })} saving={savingProfile} multiline />
@@ -487,6 +630,21 @@ const styles = StyleSheet.create({
   profileEditLabel: { fontSize: 11, color: '#64748B', fontWeight: '600', marginBottom: 5 },
   profileEditInput: { minHeight: 38, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: '#FFFFFF', color: Navy.primary, fontSize: 13 },
   profileEditMultiline: { minHeight: 72, textAlignVertical: 'top' },
+  profileRadioOptions: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 1 },
+  profileRadioOption: { flexDirection: 'row', alignItems: 'center', minWidth: '50%', paddingVertical: 5, paddingRight: 8 },
+  profileRadioOuter: { width: 18, height: 18, borderWidth: 1.5, borderColor: '#94A3B8', borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginRight: 7 },
+  profileRadioOuterSelected: { borderColor: Navy.primary },
+  profileRadioInner: { width: 9, height: 9, borderRadius: 5, backgroundColor: Navy.primary },
+  profileChoiceText: { color: Navy.primary, fontSize: 13 },
+  profileChoiceTextSelected: { fontWeight: '600' },
+  profileSelect: { minHeight: 38, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 9, paddingHorizontal: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  profileSelectText: { color: Navy.primary, fontSize: 13 },
+  profileSelectPlaceholder: { color: '#94A3B8', fontSize: 13 },
+  profileModalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, backgroundColor: 'rgba(15, 23, 42, 0.45)' },
+  profileModalCard: { width: '100%', maxHeight: '70%', borderRadius: 14, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, backgroundColor: '#FFFFFF' },
+  profileModalTitle: { color: Navy.primary, fontSize: 15, fontWeight: '700', marginBottom: 8 },
+  profileModalList: { maxHeight: 360 },
+  profileModalOption: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   profileSaveButton: { alignSelf: 'flex-end', marginTop: 6, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: Navy.primary },
   profileSaveButtonDisabled: { opacity: 0.4 },
   profileSaveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },

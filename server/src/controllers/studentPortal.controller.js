@@ -1,5 +1,8 @@
 const prisma = require("../config/prisma");
 
+const PROFILE_GENDERS = new Set(["Male", "Female", "Other", "Prefer not to say"]);
+const PROFILE_BLOOD_GROUPS = new Set(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]);
+
 function fail(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -436,7 +439,14 @@ exports.updateProfile = async (req, res, next) => {
       const value = req.body[field];
       if (value !== null && typeof value !== "string") fail(`${field} must be text`);
       if (typeof value === "string" && value.length > 300) fail(`${field} is too long`);
-      profileData[field] = value?.trim() || null;
+      const normalized = typeof value === "string" ? value.trim() : null;
+      if (field === "gender" && normalized && !PROFILE_GENDERS.has(normalized)) {
+        fail(`gender must be one of: ${[...PROFILE_GENDERS].join(", ")}`);
+      }
+      if (field === "bloodGroup" && normalized && !PROFILE_BLOOD_GROUPS.has(normalized)) {
+        fail(`bloodGroup must be one of: ${[...PROFILE_BLOOD_GROUPS].join(", ")}`);
+      }
+      profileData[field] = normalized || null;
     }
     if (Object.hasOwn(req.body || {}, "dateOfBirth")) {
       if (req.body.dateOfBirth === null || req.body.dateOfBirth === "") profileData.dateOfBirth = null;
