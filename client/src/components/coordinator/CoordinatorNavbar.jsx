@@ -59,7 +59,7 @@ const CoordinatorNavbar = ({ onToggleSidebar, pageTitle = 'Dashboard' }) => {
           </span>
           <span className="hidden sm:inline-block text-slate-300">|</span>
           <span className="hidden sm:inline-block text-xs font-extrabold tracking-wider text-slate-700 uppercase">
-            CO-ORDINATOR PORTAL
+            EVENT COORDINATOR PORTAL
           </span>
           <span className="hidden sm:inline-block text-slate-300">/</span>
           <h2 className="text-sm font-bold text-slate-900">{pageTitle}</h2>

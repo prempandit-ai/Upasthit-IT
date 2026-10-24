@@ -1,6 +1,7 @@
 const express = require("express");
 const facultyController = require("../controllers/faculty.controller");
 const portalManagementController = require("../controllers/studentPortalManagement.controller");
+const eventController = require("../controllers/event.controller");
 const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const requireApproved = require("../middleware/approval.middleware");
@@ -29,6 +30,11 @@ router.patch("/assignments/:id/submissions/:submissionId/review", authorize("FAC
 router.get("/study-plans", authorize("FACULTY"), portalManagementController.listFacultyStudyPlans);
 router.post("/study-plans", authorize("FACULTY"), portalManagementController.createFacultyStudyPlan);
 router.patch("/study-plans/:id/publish", authorize("FACULTY"), portalManagementController.publishStudyPlan);
+
+// Events (Faculty read-only viewing; creation restricted to Coordinator/HOD/Admin)
+router.get("/events/stats", authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"), eventController.getEventStats);
+router.get("/events", authorize("ADMIN", "HOD", "COORDINATOR", "FACULTY"), eventController.listEvents);
+router.post("/events", authorize("ADMIN", "HOD", "COORDINATOR"), eventController.createEvent);
 
 // List all faculty — Admin, HOD, Coordinator
 router.get("/", authorize("ADMIN", "HOD", "COORDINATOR"), facultyController.listFaculty);

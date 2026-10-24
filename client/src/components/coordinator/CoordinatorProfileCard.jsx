@@ -20,7 +20,7 @@ const CoordinatorProfileCard = ({ className = '' }) => {
     <div className={`flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-xs ${className}`}>
       <div>
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 text-center mb-4">
-          Coordinator Profile
+          Event Coordinator Profile
         </h3>
 
         <div className="flex flex-col items-center text-center">

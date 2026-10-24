@@ -1,3 +1,4 @@
+import { attendanceCounts, attendanceRecords, markLoadedRoster, rosterShortcut } from '../../../utils/attendanceMarking';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -106,7 +107,10 @@ const TakeAttendance = () => {
   const timeLeftRef = useRef(0);
   const [searchStudent, setSearchStudent] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [backendStats, setBackendStats] = useState({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
+  const submissionLock = useRef(false);
+  const lastSubmission = useRef('');
+  const [focusedStudentId, setFocusedStudentId] = useState(null);
+  const rowRefs = useRef(new Map());
 
   const [history, setHistory] = useState([]);
   const [historyFilterType, setHistoryFilterType] = useState('All');
@@ -166,10 +170,10 @@ const TakeAttendance = () => {
 
   const sessionStatus = session?.status || 'NOT_STARTED';
   const sessionActive = sessionStatus === 'ACTIVE' && timeLeftSeconds > 0;
-  const selectionLocked = sessionStatus === 'ACTIVE';
-  const canMark = sessionActive;
-  const canSubmit = sessionActive && students.some((student) => student.eligible !== false);
-  const cannotStartEmptyLab = isLabSession && (!labBatch || studentsLoading || students.length === 0);
+  const selectionLocked = sessionStatus === 'ACTIVE' || starting || submitting;
+  const canMark = sessionActive && !studentsLoading && !submitting;
+  const canSubmit = canMark && students.some((student) => student.eligible !== false);
+  const cannotStartEmptyLab = isLabSession && (!labBatch || studentsLoading || !students.some((student) => student.eligible !== false));
 
   const sessionDetails = {
     course: session?.assignment?.subjectName || subject || '—',
@@ -188,29 +192,31 @@ const TakeAttendance = () => {
     );
   }, [students, searchStudent]);
 
-  const localStats = useMemo(() => {
-    const present = students.filter((s) => s.status === 'PRESENT').length;
-    const absent = students.filter((s) => s.status === 'ABSENT').length;
-    const late = students.filter((s) => s.status === 'LATE').length;
-    const excused = students.filter((s) => s.status === 'EXCUSED').length;
-    const marked = present + absent + late + excused;
-    return {
-      total: backendStats.total || students.length,
-      present,
-      absent,
-      late,
-      excused,
-      marked: backendStats.marked ?? marked,
-      missing: backendStats.missing ?? Math.max(0, (backendStats.total || students.length) - marked),
-    };
-  }, [students, backendStats]);
+  const localStats = useMemo(() => attendanceCounts(students), [students]);
+
+  // Scoped to the roster so shortcuts never intercept other page controls.
+  const handleRosterKeyDown = (event) => {
+    if (!canMark || event.ctrlKey || event.metaKey || event.altKey ||
+        event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const key = event.key.toLowerCase();
+    if (!['arrowup', 'arrowdown', 'p', 'a'].includes(key) || !filteredStudents.length) return;
+    event.preventDefault();
+    const action = rosterShortcut(filteredStudents, focusedStudentId, key);
+    if (!action) return;
+    setFocusedStudentId(action.id);
+    rowRefs.current.get(action.id)?.focus();
+    if (action.status) {
+      dirtyStudentStatuses.current.set(action.id, action.status);
+      setStudents((previous) => previous.map((item) => item.id === action.id
+        ? { ...item, status: action.status } : item));
+    }
+  };
 
   const applySession = useCallback((nextSession) => {
     if (!nextSession) {
       setSession(null);
       setTimeLeftSeconds(0);
       timeLeftRef.current = 0;
-      setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
       storeAttendanceSessionId(null);
       return;
     }
@@ -218,7 +224,6 @@ const TakeAttendance = () => {
     const remaining = remainingFromSession(nextSession);
     setTimeLeftSeconds(remaining);
     timeLeftRef.current = remaining;
-    if (nextSession.stats) setBackendStats(nextSession.stats);
     if (nextSession.status === 'ACTIVE') storeAttendanceSessionId(nextSession.id);
     else storeAttendanceSessionId(null);
   }, []);
@@ -243,14 +248,14 @@ const TakeAttendance = () => {
       setStudents([]);
       setStudentsLoading(false);
       setStudentsError('');
-      setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
+
       return;
     }
     if (type === 'Lab Session' && !selectedLabBatch) {
       setStudents([]);
       setStudentsLoading(false);
       setStudentsError('Select a lab batch to load its assigned students.');
-      setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
+
       return;
     }
     setStudents([]);
@@ -273,13 +278,7 @@ const TakeAttendance = () => {
         .sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
       if (requestId !== rosterRequestId.current) return;
       setStudents(roster);
-      setBackendStats({
-        total: roster.length,
-        marked: roster.filter((student) => student.status).length,
-        missing: roster.filter((student) => !student.status).length,
-        present: roster.filter((student) => student.status === 'PRESENT').length,
-        absent: roster.filter((student) => student.status === 'ABSENT').length,
-      });
+
       if (roster.length === 0) {
         setStudentsError(
           type === 'Lab Session'
@@ -338,7 +337,6 @@ const TakeAttendance = () => {
         setStudents(roster);
       }
       if (data.session) {
-        if (data.session.stats) setBackendStats(data.session.stats);
         if (!silent || data.session.status !== 'ACTIVE') {
           applySession(data.session);
         }
@@ -484,7 +482,7 @@ const TakeAttendance = () => {
       try {
         await completeAttendanceSession(session.id);
       } catch {
-        // Backend expiry validation is the source of truth even if complete fails.
+        // Expiry validation on the server remains authoritative if completion races.
       }
       try {
         const { data } = await getAttendanceSession(session.id);
@@ -630,7 +628,6 @@ const TakeAttendance = () => {
       setSession((current) => current?.id === session.id
         ? { ...current, joinCode: data.session.joinCode || current.joinCode }
         : current);
-      if (data.session.stats) setBackendStats(data.session.stats);
       showToast('Student check-in code issued for this active window.', 'success');
     } catch (error) {
       showToast(getAttendanceErrorMessage(error, 'Unable to issue a student check-in code'), 'error');
@@ -647,12 +644,12 @@ const TakeAttendance = () => {
     students.forEach((student) => {
       if (student.eligible !== false) dirtyStudentStatuses.current.set(student.id, status);
     });
-    setStudents((prev) => prev.map((s) => (s.eligible === false ? s : { ...s, status })));
+    setStudents((prev) => markLoadedRoster(prev, status));
     showToast(`Marked all students as ${status}`, 'info');
   };
 
   const handleStatusChange = (id, newStatus) => {
-    if (!canMark) return;
+    if (!canMark || !['PRESENT', 'ABSENT', ''].includes(newStatus)) return;
     dirtyStudentStatuses.current.set(id, newStatus);
     setStudents((prev) => prev.map((s) =>
       s.id === id && s.eligible !== false ? { ...s, status: newStatus } : s
@@ -660,21 +657,30 @@ const TakeAttendance = () => {
   };
 
   const handleSubmitAttendance = async () => {
-    if (!session?.id) {
+    if (submissionLock.current) return;
+    if (!session?.id || !canSubmit) {
       showToast('Start the attendance window before submitting.', 'error');
       return;
     }
-    const records = students
-      .filter((student) => student.eligible !== false && student.status)
-      .map((student) => ({ studentId: student.id, status: student.status }));
+    let records;
+    try { records = attendanceRecords(students); }
+    catch (error) { showToast(error.message, 'error'); return; }
     if (records.length === 0) {
       showToast('Mark at least one student before submitting attendance.', 'warning');
       return;
     }
 
+    const signature = JSON.stringify([session.id, records]);
+    if (signature === lastSubmission.current) {
+      showToast('These attendance marks have already been submitted.', 'info');
+      return;
+    }
+    if (!window.confirm(`Submit attendance for ${localStats.total} students? Present: ${localStats.present}, Absent: ${localStats.absent}, Unmarked: ${localStats.missing}. Unmarked students will not be saved.`)) return;
+    submissionLock.current = true;
     setSubmitting(true);
     try {
       const { data } = await submitAttendance(session.id, { records });
+      lastSubmission.current = signature;
       if (data.session) applySession(data.session);
       dirtyStudentStatuses.current.clear();
       sessionRosterRequestId.current += 1;
@@ -683,6 +689,7 @@ const TakeAttendance = () => {
     } catch (error) {
       showToast(getAttendanceErrorMessage(error, 'Attendance was not saved. Please try again.'), 'error');
     } finally {
+      submissionLock.current = false;
       setSubmitting(false);
     }
   };
@@ -1065,6 +1072,9 @@ const TakeAttendance = () => {
           />
         </div>
 
+        <p className="mb-3 text-xs text-slate-500" aria-live="polite">
+          P = Present | A = Absent | Arrow Up/Down = move between rows. Bulk actions affect the loaded eligible roster ({localStats.total}), including search-hidden rows. Historical rows are read-only.
+        </p>
         {/* Student Table */}
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <table className="w-full text-left text-xs text-slate-700">
@@ -1092,7 +1102,10 @@ const TakeAttendance = () => {
                 </tr>
               ) : (
                 filteredStudents.map((st, idx) => (
-                  <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={st.id} tabIndex={0} onKeyDown={handleRosterKeyDown}
+                    ref={(node) => { if (node) rowRefs.current.set(st.id, node); else rowRefs.current.delete(st.id); }}
+                    onFocus={() => setFocusedStudentId(st.id)}
+                    className="hover:bg-slate-50/80 focus:bg-blue-50 focus:outline-2 focus:outline-blue-500 transition-colors">
                     <td className="px-4 py-3 text-slate-400">{idx + 1}</td>
                     <td className="px-4 py-3 font-mono font-medium text-slate-900">{st.rollNo || '—'}</td>
                     <td className="px-4 py-3 font-medium text-slate-900">
@@ -1104,26 +1117,20 @@ const TakeAttendance = () => {
                       ) : null}
                     </td>
                     <td className="px-4 py-3">
-                      <select
-                        value={st.status || ''}
-                        disabled={!canMark || st.eligible === false}
-                        onChange={(e) => handleStatusChange(st.id, e.target.value)}
-                        className={`rounded-md border px-2 py-1 text-xs font-semibold uppercase ${
-                          st.status === 'PRESENT'
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            : st.status === 'ABSENT'
-                            ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : st.status === 'LATE'
-                            ? 'border-amber-200 bg-amber-50 text-amber-700'
-                            : 'border-blue-200 bg-blue-50 text-blue-700'
-                        }`}
-                      >
-                        <option value="">Mark</option>
-                        <option value="PRESENT">Present</option>
-                        <option value="ABSENT">Absent</option>
-                        <option value="LATE">Late</option>
-                        <option value="EXCUSED">Excused</option>
-                      </select>
+                      <div className="flex gap-1" role="group" aria-label={`Attendance for ${st.name}`}>
+                        {[['PRESENT', 'P', 'Present'], ['ABSENT', 'A', 'Absent'], ['', '--', 'Unmarked']].map(([value, label, title]) => (
+                          <button key={title} type="button" disabled={!canMark || st.eligible === false}
+                            aria-label={title} aria-pressed={st.status === value}
+                            onClick={() => handleStatusChange(st.id, value)}
+                            className={`rounded border px-3 py-1.5 font-semibold disabled:opacity-50 ${st.status === value
+                              ? value === 'PRESENT' ? 'border-emerald-500 bg-emerald-100 text-emerald-800'
+                                : value === 'ABSENT' ? 'border-rose-500 bg-rose-100 text-rose-800'
+                                : 'border-slate-500 bg-slate-100'
+                              : 'border-slate-200 hover:bg-slate-100'}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
@@ -1143,11 +1150,10 @@ const TakeAttendance = () => {
 
         {/* Summary Footer */}
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-slate-100 pt-4">
-          <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600">
+          <div aria-live="polite" className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600">
             <span>Present: <strong className="text-emerald-600">{localStats.present}</strong></span>
             <span>Absent: <strong className="text-rose-600">{localStats.absent}</strong></span>
-            <span>Late: <strong className="text-amber-600">{localStats.late}</strong></span>
-            <span>Missing: <strong className="text-slate-700">{localStats.missing}</strong></span>
+            <span>Unmarked: <strong className="text-slate-700">{localStats.missing}</strong></span>
           </div>
 
           <button

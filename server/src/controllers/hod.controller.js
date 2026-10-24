@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { classifyFaculty, facultyClassificationWhere } = require("../config/facultyClassification");
 const userService = require("../services/user.service");
 const { sanitizeUser } = require("../utils/userHelpers");
 
@@ -24,7 +25,7 @@ exports.getDepartmentOverview = async (req, res, next) => {
 
     const [studentCount, facultyCount, subjectCount, pendingFaculty] = await Promise.all([
       prisma.studentProfile.count({ where: { departmentCode: deptCode } }),
-      prisma.facultyProfile.count({ where: { department: { code: deptCode } } }),
+      prisma.facultyProfile.count({ where: { department: { code: deptCode }, ...facultyClassificationWhere() } }),
       prisma.subject.count({ where: { departmentCode: deptCode } }),
       prisma.user.findMany({
         where: { role: "FACULTY", status: "PENDING" },
@@ -64,14 +65,14 @@ exports.listDepartmentFaculty = async (req, res, next) => {
     }
 
     const faculty = await prisma.facultyProfile.findMany({
-      where: { department: { code: departmentCode } },
+      where: { department: { code: departmentCode }, ...facultyClassificationWhere(req.query.classification) },
       include: {
         user: { select: { id: true, name: true, email: true, status: true, isActive: true } },
         subjectAssignments: { include: { subject: true } },
       },
     });
 
-    return res.json({ success: true, faculty });
+    return res.json({ success: true, faculty: faculty.map((item) => ({ ...item, classification: classifyFaculty(item.employeeId) })) });
   } catch (error) {
     next(error);
   }

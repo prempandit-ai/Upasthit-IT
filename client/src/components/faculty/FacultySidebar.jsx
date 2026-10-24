@@ -89,7 +89,6 @@ const NAV_SECTIONS = [
     icon: CalendarIcon,
     children: [
       { label: 'My Events', href: `${PFX}/events` },
-      { label: 'Create Event', href: `${PFX}/events/create` },
       { label: 'Event Requests', href: `${PFX}/events/requests` },
       { label: 'Event Participants', href: `${PFX}/events/participants` },
       { label: 'Event Attendance', href: `${PFX}/events/attendance` },

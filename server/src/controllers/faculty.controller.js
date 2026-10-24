@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { classifyFaculty, facultyClassificationWhere } = require("../config/facultyClassification");
 const userService = require("../services/user.service");
 const { sanitizeUser } = require("../utils/userHelpers");
 
@@ -63,10 +64,13 @@ exports.createFaculty = async (req, res, next) => {
 // ─── List Faculty ─────────────────────────────────────────────────────────────
 exports.listFaculty = async (req, res, next) => {
   try {
-    const { department, page = 1, limit = 50 } = req.query;
+    const { department, page = 1, limit = 50, classification = "current" } = req.query;
+    if (!["current", "historical", "all"].includes(classification)) {
+      return res.status(400).json({ success: false, message: "Invalid faculty classification" });
+    }
 
-    const where = {};
-    if (department) where.departmentCode = department.toUpperCase();
+    const where = facultyClassificationWhere(classification);
+    if (department) where.department = { code: department.toUpperCase() };
 
     const [faculty, total] = await Promise.all([
       prisma.facultyProfile.findMany({
@@ -84,7 +88,7 @@ exports.listFaculty = async (req, res, next) => {
       prisma.facultyProfile.count({ where }),
     ]);
 
-    return res.json({ success: true, total, faculty });
+    return res.json({ success: true, total, faculty: faculty.map((item) => ({ ...item, classification: classifyFaculty(item.employeeId) })) });
   } catch (error) {
     next(error);
   }
@@ -383,16 +387,29 @@ exports.getMyDashboard = async (req, res, next) => {
     const assignments = faculty.subjectAssignments || [];
     const divisions = Array.from(new Set(assignments.map((a) => a.division).filter(Boolean)));
     const academicYears = Array.from(new Set(assignments.map((a) => a.academicYear).filter(Boolean)));
+    const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
+    let todayClasses = null;
+    let scheduleAvailable = false;
+    try {
+      todayClasses = await prisma.timetableEntry.count({ where: { facultyId: faculty.id, dayOfWeek } });
+      scheduleAvailable = true;
+    } catch (error) {
+      if (error.code !== "P2021") throw error;
+    }
 
+    const pendingAttendance = await prisma.attendanceSession.count({
+      where: { assignment: { facultyId: faculty.id }, status: "ACTIVE", expiresAt: { gt: new Date() } },
+    });
     return res.json({
       success: true,
-      todayClasses: assignments.length,
-      pendingAttendance: 1,
-      leaveRequests: 0,
-      upcomingEvents: 2,
+      todayClasses,
+      scheduleAvailable,
+      pendingAttendance,
+      leaveRequests: null,
+      upcomingEvents: null,
       totalSubjects: assignments.length,
-      assignedDivisions: divisions.join(", ") || "All Divisions",
-      academicYear: academicYears[0] || "2025-26",
+      assignedDivisions: divisions.join(", ") || "Not confirmed",
+      academicYear: academicYears.join(", ") || null,
       assignments: assignments.map((assignment) => ({
         id: assignment.id,
         academicYear: assignment.academicYear,
@@ -424,10 +441,16 @@ exports.getMyTodayClasses = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
     const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
-    const entries = await prisma.timetableEntry.findMany({
-      where: { facultyId: faculty.id, dayOfWeek },
-      include: { subject: true }, orderBy: { startTime: "asc" },
-    });
+    let entries;
+    try {
+      entries = await prisma.timetableEntry.findMany({
+        where: { facultyId: faculty.id, dayOfWeek },
+        include: { subject: true }, orderBy: { startTime: "asc" },
+      });
+    } catch (error) {
+      if (error.code !== "P2021") throw error;
+      return res.json({ success: true, classes: [], scheduleAvailable: false });
+    }
     const now = new Date().toTimeString().slice(0, 5);
     const classes = entries.map((entry) => {
       const status = now < entry.startTime ? "UPCOMING" : now < entry.endTime ? "ONGOING" : "COMPLETED";
@@ -447,7 +470,7 @@ exports.getMyTodayClasses = async (req, res, next) => {
         academicYear: entry.academicYear,
       };
     });
-    return res.json({ success: true, classes });
+    return res.json({ success: true, classes, scheduleAvailable: true });
   } catch (error) {
     next(error);
   }
@@ -464,10 +487,16 @@ exports.getMyTodaySchedule = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
     const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
-    const entries = await prisma.timetableEntry.findMany({
-      where: { facultyId: faculty.id, dayOfWeek },
-      include: { subject: true }, orderBy: { startTime: "asc" },
-    });
+    let entries;
+    try {
+      entries = await prisma.timetableEntry.findMany({
+        where: { facultyId: faculty.id, dayOfWeek },
+        include: { subject: true }, orderBy: { startTime: "asc" },
+      });
+    } catch (error) {
+      if (error.code !== "P2021") throw error;
+      return res.json({ success: true, schedule: [], scheduleAvailable: false });
+    }
     const schedule = entries.map((entry) => {
       const now = new Date().toTimeString().slice(0, 5);
       return {
@@ -484,7 +513,7 @@ exports.getMyTodaySchedule = async (req, res, next) => {
         status: now < entry.startTime ? "Upcoming" : now < entry.endTime ? "Ongoing" : "Completed",
       };
     });
-    return res.json({ success: true, schedule });
+    return res.json({ success: true, schedule, scheduleAvailable: true });
   } catch (error) {
     next(error);
   }
@@ -493,12 +522,18 @@ exports.getMyTodaySchedule = async (req, res, next) => {
 // ─── Get Current Authenticated Faculty Notifications ─────────────────────────
 exports.getMyNotifications = async (req, res, next) => {
   try {
-    const records = await prisma.studentNotification.findMany({ where: { recipientId: req.user.id }, orderBy: { createdAt: "desc" }, take: 100 });
+    let records;
+    try {
+      records = await prisma.studentNotification.findMany({ where: { recipientId: req.user.id }, orderBy: { createdAt: "desc" }, take: 100 });
+    } catch (error) {
+      if (error.code !== "P2021") throw error;
+      return res.json({ success: true, notifications: [], notificationsAvailable: false });
+    }
     const notifications = records.map((record) => ({
       id: record.id, title: record.title, body: record.body,
       createdAt: record.createdAt, unread: record.readAt === null,
     }));
-    return res.json({ success: true, notifications });
+    return res.json({ success: true, notifications, notificationsAvailable: true });
   } catch (error) {
     next(error);
   }
@@ -520,26 +555,35 @@ exports.getMyAttendanceSummary = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
 
-    const classes = (faculty.subjectAssignments || []).map((a) => {
-      const sub = a.subject;
-      return {
-        id: a.id,
-        subject: sub.subjectName,
-        subjectCode: sub.subjectCode,
-        batch: `${sub.year || "TY"} Div ${a.division || "A"}`,
-        totalStudents: 60,
-        presentCount: 54,
-        attendanceRate: 90,
-      };
+    // Session dates are grouped by the college's Asia/Kolkata calendar day.
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+    const start = new Date(today + "T00:00:00+05:30");
+    const end = new Date(start.getTime() + 86400000);
+    const sessions = await prisma.attendanceSession.findMany({
+      where: { assignment: { facultyId: faculty.id }, sessionDate: { gte: start, lt: end },
+        status: { in: ["ACTIVE", "COMPLETED"] } },
+      include: { assignment: { include: { subject: true } },
+        records: { select: { status: true } } },
+      orderBy: { sessionDate: "asc" },
     });
+    const classes = sessions.map((session) => ({
+      id: session.id,
+      subject: session.assignment.subject.subjectName,
+      classGroup: session.division ? "Division " + session.division : "Division not confirmed",
+      status: session.records.length ? "SUBMITTED" : "PENDING",
+      present: session.records.filter((record) => record.status === "PRESENT").length,
+      total: session.records.length,
+    }));
+    const submitted = classes.filter((item) => item.status === "SUBMITTED").length;
+    const total = classes.reduce((sum, item) => sum + item.total, 0);
+    const present = classes.reduce((sum, item) => sum + item.present, 0);
+    return res.json({ success: true, classes, summary: {
+      conducted: sessions.length, submitted, pending: sessions.length - submitted,
+      averagePct: total ? Math.round(present * 100 / total) : null,
+    } });
 
-    const summary = {
-      overallAttendance: 90,
-      totalClassesConducted: classes.length * 12,
-      pendingSubmissions: 1,
-    };
-
-    return res.json({ success: true, summary, classes });
   } catch (error) {
     next(error);
   }

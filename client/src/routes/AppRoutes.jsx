@@ -120,7 +120,7 @@ const AppRoutes = () => {
 
             {/* 5. Events Module */}
             <Route path="/dashboard/faculty/events" element={<EventsPage />} />
-            <Route path="/dashboard/faculty/events/create" element={<EventsPage defaultAction="create" />} />
+            <Route path="/dashboard/faculty/events/create" element={<Navigate to="/dashboard/faculty/events" replace />} />
             <Route path="/dashboard/faculty/events/requests" element={<EventsPage defaultTab="requests" />} />
             <Route path="/dashboard/faculty/events/participants" element={<EventsPage defaultTab="participants" />} />
             <Route path="/dashboard/faculty/events/attendance" element={<EventsPage defaultTab="attendance" />} />

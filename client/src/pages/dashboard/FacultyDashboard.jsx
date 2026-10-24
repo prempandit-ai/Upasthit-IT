@@ -216,7 +216,7 @@ const FacultyDashboard = () => {
   }
 
   // ── Stat card values (fall back to '—' when not loaded) ──
-  const todayCount = stats?.todayClasses ?? (classesLoading ? null : todayClasses.length);
+  const todayCount = stats?.scheduleAvailable === false ? null : (stats?.todayClasses ?? (classesLoading ? null : todayClasses.length));
   const pendingCount = stats?.pendingAttendance ?? null;
   const leaveCount = stats?.leaveRequests ?? null;
   const eventsCount = stats?.upcomingEvents ?? null;
@@ -249,7 +249,7 @@ const FacultyDashboard = () => {
             <FacultyStatCard
               label="Pending Attendance"
               value={pendingCount ?? '—'}
-              subtitle="Submit before class ends"
+              subtitle="Active attendance windows"
               icon={ClipboardDocumentCheckIcon}
               iconBg="bg-amber-50"
               iconColor="text-amber-700"
@@ -257,7 +257,7 @@ const FacultyDashboard = () => {
             <FacultyStatCard
               label="Leave Requests"
               value={leaveCount ?? '—'}
-              subtitle="Student requests pending"
+              subtitle={leaveCount == null ? "Not available" : "Student requests pending"}
               icon={DocumentTextIcon}
               iconBg="bg-rose-50"
               iconColor="text-rose-700"
@@ -265,7 +265,7 @@ const FacultyDashboard = () => {
             <FacultyStatCard
               label="Upcoming Events"
               value={eventsCount ?? '—'}
-              subtitle="This week"
+              subtitle={eventsCount == null ? "Not available" : "This week"}
               icon={CalendarDaysIcon}
               iconBg="bg-emerald-50"
               iconColor="text-emerald-700"
@@ -301,8 +301,8 @@ const FacultyDashboard = () => {
         ) : todayClasses.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-200 bg-white py-12 text-center">
             <AcademicCapIcon className="h-8 w-8 text-slate-300" />
-            <p className="text-sm font-medium text-slate-500">No classes scheduled for today.</p>
-            <p className="text-xs text-slate-400">Enjoy your free day!</p>
+            <p className="text-sm font-medium text-slate-500">No timetable records are available.</p>
+            <p className="text-xs text-slate-400">Teaching assignments are shown below.</p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -352,7 +352,7 @@ const FacultyDashboard = () => {
                   {assignment.subject?.year} · Semester {assignment.subject?.semester} · {assignment.academicYear}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  {assignment.division ? `Division ${assignment.division}` : 'All divisions'}
+                  {assignment.division ? `Division ${assignment.division}` : 'Division not confirmed'}
                 </p>
               </div>
             ))}
@@ -396,7 +396,7 @@ const FacultyDashboard = () => {
             </div>
           ) : schedule.length === 0 ? (
             <p className="py-6 text-center text-xs text-slate-400">
-              No classes scheduled for today.
+              No timetable records are available.
             </p>
           ) : (
             schedule.map((item, i) => (
