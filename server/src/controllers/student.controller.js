@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const userService = require("../services/user.service");
 const { hashPassword } = require("../utils/hashPassword");
 const { sanitizeUser } = require("../utils/userHelpers");
+const studentAttendanceService = require("../services/studentAttendance.service");
 
 // ─── Create Student (Admin / Coordinator can create directly) ─────────────────
 exports.createStudent = async (req, res, next) => {
@@ -424,30 +425,52 @@ exports.getMyDashboard = async (req, res, next) => {
   try {
     const profile = await prisma.studentProfile.findUnique({
       where: { userId: req.user.id },
-      include: {
-        subjectEnrollments: {
-          include: { subject: true },
-        },
-      },
+      select: { id: true, academicYear: true, year: true, semester: true, division: true, labBatch: true },
     });
 
     if (!profile) {
       return res.status(404).json({ success: false, message: "Student profile not found" });
     }
 
-    const totalSubjects = profile.subjectEnrollments.length;
+    const [enrolledSubjectsCount, attendance, unreadNotificationCount, registeredUpcomingEvents, enrollments] = await Promise.all([
+      prisma.studentSubjectEnrollment.count({
+        where: { studentId: profile.id, academicYear: profile.academicYear, status: "ACTIVE" },
+      }),
+      studentAttendanceService.getStudentAttendanceSummary(req.user.id),
+      prisma.studentNotification.count({ where: { recipientId: req.user.id, readAt: null } }),
+      prisma.eventRegistration.count({
+        where: { studentId: profile.id, status: "REGISTERED", event: { status: "PUBLISHED", startsAt: { gte: new Date() } } },
+      }),
+      prisma.studentSubjectEnrollment.findMany({
+        where: { studentId: profile.id, academicYear: profile.academicYear, status: "ACTIVE" },
+        select: { subjectId: true },
+      }),
+    ]);
+
+    const assignments = enrollments.length ? await prisma.academicAssignment.findMany({
+      where: {
+        subjectId: { in: enrollments.map((row) => row.subjectId) }, academicYear: profile.academicYear,
+        year: profile.year, semester: profile.semester, status: "PUBLISHED",
+        OR: [
+          { division: null },
+          { division: profile.division, OR: [{ labBatch: null }, ...(profile.labBatch ? [{ labBatch: profile.labBatch }] : [])] },
+          { division: `Division ${profile.division}`, OR: [{ labBatch: null }, ...(profile.labBatch ? [{ labBatch: profile.labBatch }] : [])] },
+        ],
+      },
+      include: { submissions: { where: { studentId: profile.id }, select: { id: true } } },
+    }) : [];
+    const pendingAssignmentCount = assignments.filter((assignment) => assignment.submissions.length === 0 && assignment.dueAt >= new Date()).length;
 
     return res.json({
       success: true,
       data: {
-        attendancePercentage: 88,
-        attendanceStatus: "Good Standing",
-        pendingAssignments: 2,
-        cgpa: 8.64,
-        upcomingTests: 1,
-        todayClassesCount: totalSubjects,
-        unreadNotifications: 2,
-        enrolledSubjectsCount: totalSubjects,
+        attendancePercentage: attendance.overallPercentage,
+        attendanceStatus: attendance.status,
+        enrolledSubjectsCount,
+        pendingAssignmentCount,
+        unreadNotificationCount,
+        registeredUpcomingEvents,
+        attendance,
       },
     });
   } catch (error) {
@@ -458,76 +481,26 @@ exports.getMyDashboard = async (req, res, next) => {
 // ─── Get Current Authenticated Student Attendance ────────────────────────────
 exports.getMyAttendance = async (req, res, next) => {
   try {
-    const profile = await prisma.studentProfile.findUnique({
-      where: { userId: req.user.id },
-      include: {
-        subjectEnrollments: {
-          include: {
-            subject: {
-              include: {
-                facultyAssignments: {
-                  include: {
-                    faculty: {
-                      include: { user: { select: { name: true } } },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
+    const data = await studentAttendanceService.getStudentAttendanceSummary(req.user.id);
+    return res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    if (!profile) {
-      return res.status(404).json({ success: false, message: "Student profile not found" });
-    }
+exports.getMyActiveAttendanceSessions = async (req, res, next) => {
+  try {
+    const sessions = await studentAttendanceService.listActiveSessions(req.user.id);
+    return res.json({ success: true, sessions });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    const subjects = profile.subjectEnrollments.map((enrollment) => {
-      const sub = enrollment.subject;
-      const assignedFaculty =
-        sub.facultyAssignments?.[0]?.faculty?.user?.name || "Department Faculty";
-      return {
-        id: String(sub.id),
-        name: sub.subjectName,
-        code: sub.subjectCode,
-        faculty: assignedFaculty,
-        present: 28,
-        conducted: 32,
-        percentage: 88,
-        status: "Good",
-      };
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        overallPercentage: 88,
-        totalConducted: subjects.length * 32,
-        totalPresent: subjects.length * 28,
-        totalAbsent: subjects.length * 4,
-        totalLate: 2,
-        minimumRequired: 75,
-        status: "Good Standing",
-        subjects,
-        history: [
-          {
-            id: "h1",
-            date: "Today",
-            subject: subjects[0]?.name || "Database Management Systems",
-            time: "09:00 AM",
-            status: "PRESENT",
-          },
-          {
-            id: "h2",
-            date: "Yesterday",
-            subject: subjects[1]?.name || "Computer Networks & Security",
-            time: "11:30 AM",
-            status: "PRESENT",
-          },
-        ],
-      },
-    });
+exports.checkInToAttendanceSession = async (req, res, next) => {
+  try {
+    const result = await studentAttendanceService.checkIn(req.user.id, req.params.id, req.body?.code);
+    return res.json({ success: true, ...result });
   } catch (error) {
     next(error);
   }

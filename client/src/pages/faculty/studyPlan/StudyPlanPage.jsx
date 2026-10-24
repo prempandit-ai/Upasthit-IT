@@ -1,115 +1,103 @@
-import { useState } from 'react';
-import { BookOpenIcon, ArrowUpTrayIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
+import { useEffect, useState } from 'react';
+import { BookOpenIcon, DocumentTextIcon, LinkIcon } from '@heroicons/react/24/outline';
 import PageHeader from '../../../components/faculty/shared/PageHeader';
-import { useToast } from '../../../context/ToastContext';
+import {
+  createFacultyStudyPlan,
+  getFacultyProfile,
+  getFacultyStudyPlans,
+  publishFacultyStudyPlan,
+} from '../../../services/facultyService';
+
+const INITIAL = { assignmentId: '', division: '', title: '', description: '', fileName: '', fileUrl: '' };
+const inputClass = 'mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
+const getError = (error) => error?.response?.data?.message || error?.message || 'Request failed.';
+const divisionLetter = (value) => String(value || '').match(/\b([A-Z])\b/i)?.[1]?.toUpperCase() || '';
 
 const StudyPlanPage = () => {
-  const { showToast } = useToast();
-  const [subject, setSubject] = useState('Database Management Systems');
-  const [semester, setSemester] = useState('Semester 3');
-  const [academicYear, setAcademicYear] = useState('2025-26');
+  const [subjectAssignments, setSubjectAssignments] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [form, setForm] = useState(INITIAL);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [publishingId, setPublishingId] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
-  const handleUpload = (e) => {
-    e.preventDefault();
-    showToast('Study plan uploaded for HOD review', 'success');
+  const load = async () => {
+    setLoading(true); setError('');
+    try {
+      const [profileResponse, plansResponse] = await Promise.all([getFacultyProfile(), getFacultyStudyPlans()]);
+      const assignments = profileResponse.data?.faculty?.subjectAssignments || [];
+      setSubjectAssignments(assignments);
+      setPlans(plansResponse.data?.studyPlans || []);
+      setForm((current) => ({ ...current, assignmentId: current.assignmentId || String(assignments[0]?.id || '') }));
+    } catch (loadError) { setError(getError(loadError)); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const selectedAssignment = subjectAssignments.find((row) => String(row.id) === form.assignmentId);
+  const fixedDivision = divisionLetter(selectedAssignment?.division);
+  const availableDivisions = fixedDivision ? [fixedDivision] : ['A', 'B', 'C'];
+  const setField = (event) => {
+    const { name, value } = event.target;
+    if (name === 'assignmentId') {
+      const match = subjectAssignments.find((row) => String(row.id) === value);
+      setForm((current) => ({ ...current, assignmentId: value, division: divisionLetter(match?.division) }));
+    } else setForm((current) => ({ ...current, [name]: value }));
+    setMessage('');
+  };
+
+  const submit = async (event, publish) => {
+    event.preventDefault();
+    if (!selectedAssignment) return;
+    setSaving(true); setError(''); setMessage('');
+    try {
+      await createFacultyStudyPlan({
+        subjectId: selectedAssignment.subjectId,
+        academicYear: selectedAssignment.academicYear,
+        division: form.division || null,
+        title: form.title,
+        description: form.description,
+        fileName: form.fileName || null,
+        fileUrl: form.fileUrl || null,
+        status: publish ? 'PUBLISHED' : 'DRAFT',
+      });
+      setForm((current) => ({ ...INITIAL, assignmentId: current.assignmentId, division: current.division }));
+      setMessage(publish ? 'Study plan published to its eligible students.' : 'Draft saved.');
+      await load();
+    } catch (saveError) { setError(getError(saveError)); }
+    finally { setSaving(false); }
+  };
+
+  const publishExisting = async (id) => {
+    setPublishingId(String(id)); setError(''); setMessage('');
+    try { await publishFacultyStudyPlan(id); setMessage('Study plan published to its eligible students.'); await load(); }
+    catch (publishError) { setError(getError(publishError)); }
+    finally { setPublishingId(''); }
   };
 
   return (
     <div className="space-y-6 pb-12">
-      <PageHeader
-        title="Study Plan"
-        breadcrumbs={[
-          { label: 'Home', href: '/dashboard/faculty' },
-          { label: 'Study Plan' },
-          { label: 'Upload Study Plan' },
-        ]}
-      />
-
+      <PageHeader title="Study Plans" breadcrumbs={[{ label: 'Home', href: '/dashboard/faculty' }, { label: 'Study Plan' }]} />
+      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}<button type="button" onClick={load} className="ml-3 font-semibold underline">Retry</button></p>}
+      {message && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</p>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Upload Form */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900 mb-4">Upload Course Study Plan</h2>
-          <form onSubmit={handleUpload} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Subject / Course</label>
-              <select
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-              >
-                <option>Database Management Systems</option>
-                <option>Data Structures &amp; Algorithms</option>
-                <option>Operating Systems</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">Semester</label>
-                <select
-                  value={semester}
-                  onChange={(e) => setSemester(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-                >
-                  <option>Semester 3</option>
-                  <option>Semester 5</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">Academic Year</label>
-                <input
-                  type="text"
-                  value={academicYear}
-                  onChange={(e) => setAcademicYear(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-slate-800"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">Syllabus File (PDF / DOCX)</label>
-              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 p-6 text-center hover:bg-slate-50 transition cursor-pointer">
-                <ArrowUpTrayIcon className="h-8 w-8 text-slate-400 mb-2" />
-                <span className="font-medium text-slate-700">Choose file or drag here</span>
-                <span className="text-[11px] text-slate-400 mt-1">PDF or Word document up to 15MB</span>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-blue-700 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-800 transition"
-            >
-              Submit Plan for Approval
-            </button>
-          </form>
-        </div>
-
-        {/* Previous Plans */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900 mb-4">Previous Approved Plans</h2>
-          <div className="space-y-3">
-            {[
-              { subject: 'Database Management Systems', sem: 'Sem 3 (2024-25)', status: 'Approved', file: 'DBMS_Syllabus_2024.pdf' },
-              { subject: 'Operating Systems', sem: 'Sem 4 (2024-25)', status: 'Approved', file: 'OS_Plan_2024.pdf' },
-              { subject: 'Data Structures', sem: 'Sem 2 (2023-24)', status: 'Archived', file: 'DSA_Plan_2023.pdf' },
-            ].map((p, i) => (
-              <div key={i} className="flex items-center justify-between rounded-lg border border-slate-100 p-3 hover:bg-slate-50 transition">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                    <DocumentTextIcon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-900 text-xs">{p.subject}</p>
-                    <p className="text-[11px] text-slate-500">{p.sem}</p>
-                  </div>
-                </div>
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
-                  {p.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-slate-900"><BookOpenIcon className="h-5 w-5 text-blue-600" />Create study plan</h2><p className="mb-4 text-xs text-slate-500">Published plans become visible to students in the matching academic group. Provide an HTTPS document link if a stored file already exists.</p>
+          {!subjectAssignments.length && !loading ? <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No assigned subjects are available for this faculty account.</p> : <form className="space-y-3" onSubmit={(event) => submit(event, false)}>
+            <label className="block text-xs font-medium text-slate-700">Assigned subject<select name="assignmentId" required value={form.assignmentId} onChange={setField} className={inputClass}><option value="">Select subject assignment</option>{subjectAssignments.map((row) => <option key={row.id} value={row.id}>{row.subject?.subjectCode} — {row.subject?.subjectName} · {row.academicYear}{row.division ? ` · Div ${divisionLetter(row.division)}` : ''}</option>)}</select></label>
+            {availableDivisions.length > 1 && <label className="block text-xs font-medium text-slate-700">Division scope<select name="division" value={form.division} onChange={setField} className={inputClass}><option value="">All divisions for this subject</option>{availableDivisions.map((division) => <option key={division} value={division}>Division {division}</option>)}</select></label>}
+            <label className="block text-xs font-medium text-slate-700">Title<input name="title" required maxLength={180} value={form.title} onChange={setField} className={inputClass} /></label>
+            <label className="block text-xs font-medium text-slate-700">Description<textarea name="description" rows={3} value={form.description} onChange={setField} className={inputClass} /></label>
+            <label className="block text-xs font-medium text-slate-700">Document URL (optional, HTTPS)<input name="fileUrl" type="url" value={form.fileUrl} onChange={setField} placeholder="https://…" className={inputClass} /></label>
+            <label className="block text-xs font-medium text-slate-700">Document name<input name="fileName" value={form.fileName} onChange={setField} className={inputClass} /></label>
+            <div className="grid grid-cols-2 gap-3 pt-2"><button type="submit" onClick={(event) => { event.preventDefault(); submit(event, false); }} disabled={saving || !selectedAssignment} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save draft'}</button><button type="button" onClick={(event) => submit(event, true)} disabled={saving || !selectedAssignment || !form.title.trim()} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : 'Publish to students'}</button></div>
+          </form>}
+        </section>
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="mb-4 text-base font-semibold text-slate-900">Saved study plans</h2>
+          {loading ? <p className="py-8 text-center text-sm text-slate-500">Loading study plans…</p> : plans.length === 0 ? <p className="rounded-lg bg-slate-50 p-8 text-center text-sm text-slate-500">No study plans have been saved.</p> : <div className="space-y-3">{plans.map((plan) => <article key={plan.id} className="rounded-lg border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div className="flex gap-3"><DocumentTextIcon className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" /><div><h3 className="text-sm font-semibold text-slate-900">{plan.title}</h3><p className="mt-1 text-xs text-slate-600">{plan.subject?.subjectCode} — {plan.subject?.subjectName}</p><p className="text-xs text-slate-500">{plan.academicYear} · {plan.year} · Semester {plan.semester}{plan.division ? ` · Division ${divisionLetter(plan.division)}` : ' · All divisions'} · Version {plan.version}</p><p className="mt-1 text-xs font-semibold text-slate-600">{plan.status}</p></div></div>{plan.status === 'DRAFT' && <button type="button" disabled={publishingId === String(plan.id)} onClick={() => publishExisting(plan.id)} className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{publishingId === String(plan.id) ? 'Publishing…' : 'Publish'}</button>}</div>{plan.description && <p className="mt-3 whitespace-pre-wrap text-xs text-slate-600">{plan.description}</p>}{plan.fileUrl && <a href={plan.fileUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-blue-700"><LinkIcon className="h-4 w-4" />{plan.fileName || 'Open document'}</a>}</article>)}</div>}
+        </section>
       </div>
     </div>
   );

@@ -9,6 +9,8 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  TextInput,
+  Linking,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,7 +21,17 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
 import { useAuth } from '@/hooks/use-auth';
 import { classifyApiError } from '@/services/api';
-import { getStudentProfile, StudentProfile } from '@/services/studentService';
+import {
+  FeeSummary,
+  getStudentDocuments,
+  getStudentFees,
+  getStudentLibrary,
+  getStudentProfile,
+  LibrarySummary,
+  StudentDocumentRecord,
+  StudentProfile,
+  updateStudentProfile,
+} from '@/services/studentService';
 import { ROLE_LABELS } from '@/utils/roles';
 import { AuthUser } from '@/utils/storage';
 
@@ -110,6 +122,39 @@ function InfoRow({
   );
 }
 
+function ProfileEditorField({
+  label,
+  value,
+  onSave,
+  saving,
+  multiline = false,
+}: {
+  label: string;
+  value: string;
+  onSave: (value: string) => void;
+  saving: boolean;
+  multiline?: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <View style={styles.profileEditRow}>
+      <ThemedText style={styles.profileEditLabel}>{label}</ThemedText>
+      <TextInput
+        value={draft}
+        onChangeText={setDraft}
+        multiline={multiline}
+        placeholder={`Enter ${label.toLowerCase()}`}
+        placeholderTextColor="#94A3B8"
+        style={[styles.profileEditInput, multiline && styles.profileEditMultiline]}
+      />
+      <Pressable disabled={saving || draft === value} onPress={() => onSave(draft.trim())} style={[styles.profileSaveButton, (saving || draft === value) && styles.profileSaveButtonDisabled]}>
+        <ThemedText style={styles.profileSaveText}>Save</ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={secStyles.wrap}>
@@ -126,6 +171,15 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<StudentDocumentRecord[]>([]);
+  const [documentsError, setDocumentsError] = useState('');
+  const [fees, setFees] = useState<FeeSummary | null>(null);
+  const [feesError, setFeesError] = useState('');
+  const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  const [libraryError, setLibraryError] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [bookSearch, setBookSearch] = useState('');
 
   const expireSession = useCallback(async () => {
     await logout();
@@ -141,20 +195,29 @@ export default function ProfileScreen() {
       }
       setError(null);
 
-      try {
-        const { data } = await getStudentProfile();
-        setProfile(data);
-      } catch (err) {
+      const [profileResult, documentsResult, feesResult, libraryResult] = await Promise.allSettled([
+        getStudentProfile(), getStudentDocuments(), getStudentFees(), getStudentLibrary(),
+      ]);
+      if (profileResult.status === 'fulfilled') {
+        setProfile(profileResult.value.data);
+        setError(null);
+      } else {
+        const err = profileResult.reason;
         if (isUnauthorized(err)) {
           await expireSession();
           return;
         }
         setProfile(null);
         setError(classifyApiError(err));
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
       }
+      if (documentsResult.status === 'fulfilled') { setDocuments(documentsResult.value.data.documents); setDocumentsError(''); }
+      else { setDocuments([]); setDocumentsError('Student documents could not be loaded.'); }
+      if (feesResult.status === 'fulfilled') { setFees(feesResult.value.data); setFeesError(''); }
+      else { setFees(null); setFeesError('Fee records could not be loaded.'); }
+      if (libraryResult.status === 'fulfilled') { setLibrary(libraryResult.value.data); setLibraryError(''); }
+      else { setLibrary(null); setLibraryError('Library records could not be loaded.'); }
+      setLoading(false);
+      setRefreshing(false);
     },
     [expireSession]
   );
@@ -165,6 +228,20 @@ export default function ProfileScreen() {
 
   const onRefresh = () => {
     fetchData(true);
+  };
+
+  const saveProfile = async (payload: Partial<StudentProfile>) => {
+    setSavingProfile(true);
+    setProfileSaved(false);
+    try {
+      const response = await updateStudentProfile(payload);
+      if (response.data?.success !== true || !response.data?.profile) throw new Error('The server did not confirm the profile update.');
+      await fetchData(true);
+      setProfileSaved(true);
+      Alert.alert('Profile saved', 'The server confirmed your profile changes.');
+    } catch (err: any) {
+      Alert.alert('Profile not saved', err?.response?.data?.message || err?.message || 'Unable to save profile changes.');
+    } finally { setSavingProfile(false); }
   };
 
   const handleLogout = () => {
@@ -323,20 +400,22 @@ export default function ProfileScreen() {
                     </Section>
 
                     <Section title="Personal Information">
-                      <InfoRow icon="calendar-number-outline" label="Date of Birth" value={formatDisplayDate(profile?.dob)} />
-                      <InfoRow icon="person-outline" label="Gender" value={profile?.gender} />
-                      <InfoRow icon="water-outline" label="Blood Group" value={profile?.bloodGroup} />
-                      <InfoRow icon="flag-outline" label="Nationality" value={profile?.nationality} />
-                      <InfoRow icon="people-circle-outline" label="Father's Name" value={profile?.fatherName} />
-                      <InfoRow icon="people-circle-outline" label="Mother's Name" value={profile?.motherName} />
-                      <InfoRow icon="call-outline" label="Phone" value={profile?.phone || profile?.mobileNumber} />
-                      <InfoRow icon="home-outline" label="Address" value={profile?.address} last />
+                      <ProfileEditorField label="Name" value={profile?.name || ''} onSave={(name) => saveProfile({ name })} saving={savingProfile} />
+                      <ProfileEditorField label="Phone" value={profile?.phone || profile?.mobileNumber || ''} onSave={(mobileNumber) => saveProfile({ mobileNumber })} saving={savingProfile} />
+                      <ProfileEditorField label="Gender" value={profile?.gender || ''} onSave={(gender) => saveProfile({ gender })} saving={savingProfile} />
+                      <ProfileEditorField label="Blood Group" value={profile?.bloodGroup || ''} onSave={(bloodGroup) => saveProfile({ bloodGroup })} saving={savingProfile} />
+                      <ProfileEditorField label="Nationality" value={profile?.nationality || ''} onSave={(nationality) => saveProfile({ nationality })} saving={savingProfile} />
+                      <ProfileEditorField label="Father's Name" value={profile?.fatherName || ''} onSave={(fatherName) => saveProfile({ fatherName })} saving={savingProfile} />
+                      <ProfileEditorField label="Mother's Name" value={profile?.motherName || ''} onSave={(motherName) => saveProfile({ motherName })} saving={savingProfile} />
+                      <ProfileEditorField label="Address" value={profile?.address || ''} onSave={(address) => saveProfile({ address })} saving={savingProfile} multiline />
+                      <ProfileEditorField label="Date of Birth (YYYY-MM-DD)" value={profile?.dob ? new Date(profile.dob).toISOString().slice(0, 10) : ''} onSave={(dateOfBirth) => saveProfile({ dateOfBirth })} saving={savingProfile} />
                     </Section>
 
                     <Section title="Emergency Contact">
-                      <InfoRow icon="person-outline" label="Name" value={profile?.emergencyContact?.name} />
-                      <InfoRow icon="heart-outline" label="Relationship" value={profile?.emergencyContact?.relationship} />
-                      <InfoRow icon="call-outline" label="Phone" value={profile?.emergencyContact?.phone} last />
+                      <ProfileEditorField label="Name" value={profile?.emergencyContact?.name || ''} onSave={(emergencyContactName) => saveProfile({ emergencyContactName } as any)} saving={savingProfile} />
+                      <ProfileEditorField label="Relationship" value={profile?.emergencyContact?.relationship || ''} onSave={(emergencyContactRelationship) => saveProfile({ emergencyContactRelationship } as any)} saving={savingProfile} />
+                      <ProfileEditorField label="Phone" value={profile?.emergencyContact?.phone || ''} onSave={(emergencyContactPhone) => saveProfile({ emergencyContactPhone } as any)} saving={savingProfile} />
+                      {profileSaved ? <ThemedText style={styles.savedLabel}>Changes saved</ThemedText> : null}
                     </Section>
                   </>
                 )}
@@ -348,11 +427,14 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'DOCUMENTS' && (
               <View style={styles.sectionWrap}>
-                <EmptyState
-                  icon="shield-checkmark-outline"
-                  title="Documents unavailable"
-                  message="Verified student documents are not stored in the database yet, so this locker cannot show real records."
-                />
+                {documentsError ? <EmptyState icon="alert-circle-outline" title="Documents unavailable" message={documentsError} /> : documents.length === 0 ? (
+                  <EmptyState icon="shield-checkmark-outline" title="No documents" message="No student document records are available. File uploads are unavailable until persistent storage is configured." />
+                ) : documents.map((document) => (
+                  <Pressable key={document.id} style={styles.docCard} onPress={() => Linking.openURL(document.fileUrl)}>
+                    <View style={styles.docDetails}><ThemedText style={styles.docName}>{document.title}</ThemedText><ThemedText style={styles.docIssuer}>{document.fileName} · {document.status}</ThemedText>{document.reviewerRemarks ? <ThemedText style={styles.docIssuer}>{document.reviewerRemarks}</ThemedText> : null}</View>
+                    <Ionicons name="open-outline" size={18} color={Navy.primary} />
+                  </Pressable>
+                ))}
               </View>
             )}
 
@@ -361,11 +443,10 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'FEES' && (
               <View style={styles.sectionWrap}>
-                <EmptyState
-                  icon="wallet-outline"
-                  title="Fee summary unavailable"
-                  message="Fee amounts and payment history are not stored in the student database yet, so this tab cannot show real records."
-                />
+                {feesError ? <EmptyState icon="alert-circle-outline" title="Fee summary unavailable" message={feesError} /> : !fees || fees.status === 'UNAVAILABLE' ? <EmptyState icon="wallet-outline" title="No fee records" message="There are no recorded fee charges or payments for this student." /> : <>
+                  <View style={styles.feeSummaryCard}><ThemedText style={styles.feeHeaderTitle}>Recorded fee ledger</ThemedText><View style={styles.feeAmountRow}><ThemedText style={styles.feeAmountLabel}>Payable</ThemedText><ThemedText style={styles.feeAmountValue}>₹{fees.totalFee.toFixed(2)}</ThemedText></View><View style={styles.feeAmountRow}><ThemedText style={styles.feeAmountLabel}>Recorded payments</ThemedText><ThemedText style={styles.feeAmountValue}>₹{fees.paidAmount.toFixed(2)}</ThemedText></View><View style={styles.feeAmountRow}><ThemedText style={styles.feeAmountLabel}>Outstanding</ThemedText><ThemedText style={styles.feeAmountValue}>₹{fees.pendingAmount.toFixed(2)}</ThemedText></View><ThemedText style={styles.docIssuer}>Online payment is not available.</ThemedText></View>
+                  <ThemedText style={styles.subSectionTitle}>Payment history</ThemedText>{fees.transactions.length === 0 ? <ThemedText style={styles.docIssuer}>No recorded payments.</ThemedText> : fees.transactions.map((payment) => <View key={payment.id} style={styles.txCard}><View style={styles.txInfo}><ThemedText style={styles.txReceipt}>{payment.receiptNo}</ThemedText><ThemedText style={styles.txDate}>{formatDisplayDate(payment.date)} · {payment.mode || 'Method unavailable'}</ThemedText></View><ThemedText style={styles.txAmount}>₹{payment.amount.toFixed(2)}</ThemedText></View>)}
+                </>}
               </View>
             )}
 
@@ -374,11 +455,12 @@ export default function ProfileScreen() {
             ══════════════════════════════════════════════════════ */}
             {activeTab === 'LIBRARY' && (
               <View style={styles.sectionWrap}>
-                <EmptyState
-                  icon="book-outline"
-                  title="Library records unavailable"
-                  message="Issued books and fines are not stored in the student database yet, so this tab cannot show real records."
-                />
+                {libraryError ? <EmptyState icon="alert-circle-outline" title="Library unavailable" message={libraryError} /> : !library ? <EmptyState icon="book-outline" title="Library unavailable" message="Library records could not be loaded." /> : <>
+                  <TextInput value={bookSearch} onChangeText={setBookSearch} placeholder="Search books" placeholderTextColor="#94A3B8" style={styles.profileEditInput} />
+                  <ThemedText style={styles.subSectionTitle}>Books in catalogue</ThemedText>
+                  {library.books.filter((book) => `${book.title} ${book.author || ''} ${book.accessionCode || ''}`.toLowerCase().includes(bookSearch.toLowerCase())).map((book) => <View key={book.id} style={styles.bookCard}><View style={styles.bookDetails}><ThemedText style={styles.bookTitle}>{book.title}</ThemedText><ThemedText style={styles.bookAuthor}>{book.author || 'Author unavailable'}</ThemedText><ThemedText style={styles.docIssuer}>{book.accessionCode || 'Accession unavailable'} · {book.availableCopies} of {book.totalCopies} available</ThemedText></View></View>)}
+                  <ThemedText style={styles.subSectionTitle}>My loans</ThemedText>{library.loans?.length ? library.loans.map((loan) => <View key={loan.id} style={styles.bookCard}><View style={styles.bookDetails}><ThemedText style={styles.bookTitle}>{loan.title}</ThemedText><ThemedText style={styles.bookAuthor}>Due {formatDisplayDate(loan.dueDate)} · {loan.status}</ThemedText><ThemedText style={styles.docIssuer}>{loan.fineAmount == null ? 'Fine policy not configured' : `Fine: ₹${loan.fineAmount.toFixed(2)}`}</ThemedText></View></View>) : <ThemedText style={styles.docIssuer}>No books are currently issued to you.</ThemedText>}
+                </>}
               </View>
             )}
 
@@ -401,6 +483,14 @@ export default function ProfileScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  profileEditRow: { paddingHorizontal: Spacing.three, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  profileEditLabel: { fontSize: 11, color: '#64748B', fontWeight: '600', marginBottom: 5 },
+  profileEditInput: { minHeight: 38, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: '#FFFFFF', color: Navy.primary, fontSize: 13 },
+  profileEditMultiline: { minHeight: 72, textAlignVertical: 'top' },
+  profileSaveButton: { alignSelf: 'flex-end', marginTop: 6, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: Navy.primary },
+  profileSaveButtonDisabled: { opacity: 0.4 },
+  profileSaveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  savedLabel: { color: '#059669', fontSize: 12, paddingHorizontal: Spacing.three, paddingBottom: 8 },
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   safe: { flex: 1 },
   header: {

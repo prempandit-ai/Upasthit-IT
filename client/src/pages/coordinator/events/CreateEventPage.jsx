@@ -6,9 +6,6 @@ import useAuth from '../../../hooks/useAuth';
 import { createEvent } from '../../../services/coordinatorService';
 import {
   CalendarDaysIcon,
-  PhotoIcon,
-  MapPinIcon,
-  ClockIcon,
   UserGroupIcon,
   DocumentTextIcon,
 } from '@heroicons/react/24/outline';
@@ -22,20 +19,19 @@ const CreateEventPage = () => {
     name: '',
     type: 'Conference',
     description: '',
-    banner: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80',
     venue: '',
     startDate: '',
     endDate: '',
-    startTime: '10:00 AM',
-    endTime: '05:00 PM',
-    maxParticipants: 200,
+    startTime: '',
+    endTime: '',
+    maxParticipants: '',
     registrationStartDate: '',
     registrationDeadline: '',
-    department: 'Computer Engineering',
-    academicYear: '2024 - 2025',
-    semester: 'Semester 6',
-    coordinator: user?.name || 'Prof. Anjali Deshmukh',
-    status: 'Upcoming',
+    academicYear: '',
+    targetYear: '',
+    targetDivision: '',
+    targetLabBatch: '',
+    coordinator: user?.name || '',
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -58,7 +54,16 @@ const CreateEventPage = () => {
     setSubmitting(true);
     try {
       await createEvent({
-        ...form,
+        name: form.name, category: form.type, description: form.description,
+        venue: form.venue, startDate: form.startDate, startTime: form.startTime,
+        endDate: form.endDate || null, endTime: form.endTime || null,
+        capacity: form.maxParticipants || null,
+        registrationOpensAt: form.registrationStartDate || null,
+        registrationDeadline: form.registrationDeadline || null,
+        targetAcademicYear: form.academicYear || null,
+        targetYear: form.targetYear || null,
+        targetDivision: form.targetDivision || null,
+        targetLabBatch: form.targetLabBatch || null,
         status: publishStatus,
       });
       showToast(
@@ -67,7 +72,7 @@ const CreateEventPage = () => {
       );
       navigate('/dashboard/coordinator/events');
     } catch (err) {
-      showToast('Failed to create event', 'error');
+      showToast(err?.response?.data?.message || 'Failed to create event', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -161,21 +166,9 @@ const CreateEventPage = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Host Department
-                </label>
-                <select
-                  name="department"
-                  value={form.department}
-                  onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500"
-                >
-                  <option value="Computer Engineering">Computer Engineering</option>
-                  <option value="Information Technology">Information Technology</option>
-                  <option value="AI & Data Science">AI & Data Science</option>
-                  <option value="Mechanical Engineering">Mechanical Engineering</option>
-                  <option value="Civil Engineering">Civil Engineering</option>
-                  <option value="General / Inter-departmental">General / Inter-departmental</option>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Target Student Year</label>
+                <select name="targetYear" value={form.targetYear} onChange={handleChange} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500">
+                  <option value="">All years</option><option value="FY">FY</option><option value="SY">SY</option><option value="TY">TY</option><option value="BE">BE</option>
                 </select>
               </div>
 
@@ -234,11 +227,10 @@ const CreateEventPage = () => {
                   Start Time
                 </label>
                 <input
-                  type="text"
+                  type="time"
                   name="startTime"
                   value={form.startTime}
                   onChange={handleChange}
-                  placeholder="10:00 AM"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500"
                 />
               </div>
@@ -248,11 +240,10 @@ const CreateEventPage = () => {
                   End Time
                 </label>
                 <input
-                  type="text"
+                  type="time"
                   name="endTime"
                   value={form.endTime}
                   onChange={handleChange}
-                  placeholder="05:00 PM"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500"
                 />
               </div>
@@ -324,44 +315,8 @@ const CreateEventPage = () => {
           </div>
         </div>
 
-        {/* Right Sidebar Details & Banner Preview (4 Cols) */}
+        {/* Right Sidebar Details (4 Cols) */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Banner Image Preview */}
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <PhotoIcon className="h-4 w-4 text-blue-600" />
-              Event Banner Image
-            </h4>
-
-            <div className="relative h-40 w-full rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
-              {form.banner ? (
-                <img
-                  src={form.banner}
-                  alt="Banner preview"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center text-xs text-slate-400">
-                  No image URL
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                Banner Image URL
-              </label>
-              <input
-                type="text"
-                name="banner"
-                value={form.banner}
-                onChange={handleChange}
-                placeholder="https://..."
-                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:border-blue-500"
-              />
-            </div>
-          </div>
-
           {/* Academic Scoping */}
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -383,15 +338,14 @@ const CreateEventPage = () => {
 
             <div>
               <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                Target Semester
+                Target Division
               </label>
-              <input
-                type="text"
-                name="semester"
-                value={form.semester}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"
-              />
+              <select name="targetDivision" value={form.targetDivision} onChange={handleChange} className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"><option value="">All divisions</option><option value="A">Division A</option><option value="B">Division B</option><option value="C">Division C</option></select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 mb-1">Target Lab Batch</label>
+              <input type="text" name="targetLabBatch" value={form.targetLabBatch} onChange={handleChange} placeholder="Optional, for example A1" className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs" />
             </div>
 
             <div>

@@ -17,7 +17,6 @@ import {
   IdentificationIcon,
   ArrowsRightLeftIcon,
   ChartBarIcon,
-  ArrowRightIcon,
 } from '@heroicons/react/24/outline';
 import {
   getCoordinatorDashboardStats,
@@ -30,12 +29,12 @@ const CoordinatorDashboardPage = () => {
 
   const [dashboardData, setDashboardData] = useState(null);
   const [eventsList, setEventsList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
-      setLoading(true);
       try {
+        setLoadError('');
         const [statsRes, eventsRes] = await Promise.all([
           getCoordinatorDashboardStats(),
           getEvents(),
@@ -44,20 +43,19 @@ const CoordinatorDashboardPage = () => {
         setEventsList(eventsRes);
       } catch (err) {
         console.error('Failed to load coordinator dashboard data', err);
-      } finally {
-        setLoading(false);
+        setLoadError(err?.response?.data?.message || err?.message || 'Unable to load dashboard records.');
       }
     };
     loadData();
   }, []);
 
   const stats = dashboardData?.stats || {
-    totalEvents: 12,
-    totalParticipants: 356,
-    totalFaculty: 48,
-    todayEvents: 2,
-    attendanceTakenRate: 68,
-    attendanceBreakdown: { presentRate: 68, absentRate: 22, notMarkedRate: 10 },
+    totalEvents: '—',
+    totalParticipants: '—',
+    totalFaculty: '—',
+    todayEvents: '—',
+    attendanceTakenRate: null,
+    attendanceBreakdown: null,
   };
 
   const upcomingEvents = dashboardData?.upcomingEvents || eventsList.slice(0, 3);
@@ -76,6 +74,8 @@ const CoordinatorDashboardPage = () => {
           </p>
         </div>
 
+        {loadError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}</p>}
+
         {/* Top split row: 5 Stat Cards on left, Event Carousel on right */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
           {/* Stat Cards Grid (7 cols on lg) */}
@@ -83,7 +83,7 @@ const CoordinatorDashboardPage = () => {
             <StatCard
               title="Total Events"
               value={stats.totalEvents}
-              subtitle="Active Events"
+              subtitle="Saved event records"
               icon={CalendarDaysIcon}
               onClick={() => navigate('/dashboard/coordinator/events')}
             />
@@ -97,7 +97,7 @@ const CoordinatorDashboardPage = () => {
             <StatCard
               title="Total Faculty"
               value={stats.totalFaculty}
-              subtitle="Mapped"
+              subtitle="Faculty records"
               icon={AcademicCapIcon}
               onClick={() => navigate('/dashboard/coordinator/faculty')}
             />
@@ -110,7 +110,7 @@ const CoordinatorDashboardPage = () => {
             />
             <StatCard
               title="Attendance Taken"
-              value={`${stats.attendanceTakenRate}%`}
+              value={stats.attendanceTakenRate == null ? '—' : `${stats.attendanceTakenRate}%`}
               subtitle="Overall"
               icon={ClipboardDocumentCheckIcon}
               onClick={() => navigate('/dashboard/coordinator/attendance-mapping')}
@@ -396,13 +396,17 @@ const CoordinatorDashboardPage = () => {
         </div>
 
         {/* 3. Attendance Overview Donut Chart */}
-        <AttendanceChart
-          present={stats.attendanceBreakdown?.presentRate || 68}
-          absent={stats.attendanceBreakdown?.absentRate || 22}
-          notMarked={stats.attendanceBreakdown?.notMarkedRate || 10}
-          overallRate={`${stats.attendanceTakenRate || 68}%`}
-          onViewReport={() => navigate('/dashboard/coordinator/reports')}
-        />
+        {stats.attendanceBreakdown ? (
+          <AttendanceChart
+            present={stats.attendanceBreakdown.presentRate}
+            absent={stats.attendanceBreakdown.absentRate}
+            notMarked={stats.attendanceBreakdown.notMarkedRate}
+            overallRate={stats.attendanceTakenRate == null ? '—' : `${stats.attendanceTakenRate}%`}
+            onViewReport={() => navigate('/dashboard/coordinator/reports')}
+          />
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Event attendance records are not available.</div>
+        )}
       </div>
     </div>
   );

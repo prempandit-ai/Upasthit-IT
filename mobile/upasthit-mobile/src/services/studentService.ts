@@ -1,15 +1,5 @@
 import api from '@/services/api';
 
-/**
- * Student API Service Layer
- * Centralizes all student portal endpoints.
- * Integrates with existing JWT authenticated Axios instance.
- * Includes graceful default fallbacks so the mobile app stays functional
- * during backend feature development.
- */
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
 export interface StudentProfile {
   id: string;
   name: string;
@@ -34,6 +24,7 @@ export interface StudentProfile {
   enrollmentStatus?: string;
   approvalStatus?: string;
   dob?: string;
+  dateOfBirth?: string;
   gender?: string;
   bloodGroup?: string;
   nationality?: string;
@@ -43,11 +34,7 @@ export interface StudentProfile {
   mobileNumber?: string;
   address?: string;
   permanentAddress?: string;
-  emergencyContact?: {
-    name: string;
-    relationship: string;
-    phone: string;
-  };
+  emergencyContact?: { name: string; relationship: string; phone: string };
   subjectEnrollments?: any[];
 }
 
@@ -56,7 +43,7 @@ export interface TodayClass {
   time: string;
   subject: string;
   faculty: string;
-  room: string;
+  room: string | null;
   type: 'Lecture' | 'Lab' | 'Tutorial';
   status?: 'Upcoming' | 'Ongoing' | 'Completed';
 }
@@ -65,31 +52,69 @@ export interface AttendanceSubject {
   id: string;
   name: string;
   code: string;
-  faculty: string;
+  faculty: string | null;
   present: number;
+  absent: number;
   conducted: number;
-  percentage: number;
-  status: 'Good' | 'Warning' | 'Critical';
+  applicableSessions: number;
+  percentage: number | null;
+  status: null;
 }
 
 export interface AttendanceHistoryItem {
   id: string;
   date: string;
   subject: string;
-  time: string;
-  status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
+  subjectCode: string;
+  faculty: string | null;
+  time: string | null;
+  status: 'PRESENT' | 'ABSENT';
+  sessionType: string;
+  division: string;
+  labBatch: string | null;
+  academicYear: string;
+  semester: number;
+  year: string;
+  markedAt: string;
 }
 
 export interface AttendanceSummary {
-  overallPercentage: number;
+  overallPercentage: number | null;
   totalConducted: number;
+  totalApplicableSessions: number;
+  totalApplicableLectures: number;
+  totalApplicableLabSessions: number;
+  totalMarked: number;
   totalPresent: number;
   totalAbsent: number;
+  unmarkedCount: number;
   totalLate: number;
-  minimumRequired: number;
-  status: 'Good Standing' | 'Low Attendance' | 'Critical';
+  minimumRequired: null;
+  status: null;
+  attendanceBasis: string;
   subjects: AttendanceSubject[];
   history: AttendanceHistoryItem[];
+}
+
+export interface ActiveAttendanceSession {
+  id: number;
+  status: 'ACTIVE';
+  sessionDate: string;
+  attendanceType: string | null;
+  sessionType: string | null;
+  division: string;
+  labBatch: string | null;
+  academicYear: string;
+  year: string;
+  semester: number;
+  startedAt: string;
+  expiresAt: string;
+  remainingSeconds: number;
+  serverTime: string;
+  serverClockOffsetMs?: number;
+  subject: { id: number; code: string; name: string };
+  faculty: string;
+  attendanceStatus: 'PRESENT' | 'ABSENT' | null;
 }
 
 export interface Assignment {
@@ -104,6 +129,10 @@ export interface Assignment {
   marks?: string;
   description?: string;
   instructions?: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  feedback?: string | null;
+  submission?: { id: string; responseText?: string | null; attachmentUrl?: string | null; attachmentName?: string | null; submittedAt: string; feedbackReleased: boolean } | null;
 }
 
 export interface Project {
@@ -123,7 +152,8 @@ export interface StudyPlan {
   faculty: string;
   semester: string;
   uploadedDate: string;
-  fileName: string;
+  fileName?: string | null;
+  fileUrl?: string | null;
   fileSize?: string;
 }
 
@@ -133,6 +163,9 @@ export interface StudentRequest {
   appliedDate: string;
   reason: string;
   status: 'Pending' | 'Under Review' | 'Approved' | 'Rejected' | 'Sent Back';
+  startDate?: string;
+  endDate?: string;
+  reviewerRemarks?: { action: string; remarks: string | null; reviewer: string; createdAt: string }[];
 }
 
 export interface CampusEvent {
@@ -147,6 +180,10 @@ export interface CampusEvent {
   status: 'Upcoming' | 'Ongoing' | 'Completed';
   category?: 'Technical' | 'Cultural' | 'Sports' | 'Workshop' | 'Academic';
   isRegistered?: boolean;
+  canRegister?: boolean;
+  canCancel?: boolean;
+  allowCancellation?: boolean;
+  registrationDeadline?: string | null;
 }
 
 export interface StudentNotification {
@@ -156,6 +193,7 @@ export interface StudentNotification {
   description: string;
   timestamp: string;
   read: boolean;
+  relatedUrl?: string | null;
 }
 
 export interface FeeSummary {
@@ -163,670 +201,185 @@ export interface FeeSummary {
   paidAmount: number;
   pendingAmount: number;
   dueDate: string;
-  status: 'PAID' | 'PARTIAL' | 'PENDING';
-  transactions: {
-    id: string;
-    receiptNo: string;
-    date: string;
-    amount: number;
-    mode: string;
-    status: string;
-  }[];
+  status: 'PAID' | 'PARTIAL' | 'PENDING' | 'UNAVAILABLE';
+  charges?: { id: number; title: string; academicYear: string; amount: number; dueDate: string | null }[];
+  paymentProcessingAvailable?: boolean;
+  transactions: { id: string; receiptNo: string; date: string; amount: number; mode: string; status: string }[];
 }
 
 export interface LibrarySummary {
   issuedBooksCount: number;
   maxAllowed: number;
   fineAmount: number;
-  books: {
-    id: string;
-    title: string;
-    author: string;
-    accessionNo: string;
-    issueDate: string;
-    dueDate: string;
-    daysRemaining: number;
-    status: 'ACTIVE' | 'OVERDUE' | 'RETURNED';
-  }[];
+  finePolicyConfigured?: boolean;
+  books: { id: number; title: string; author: string | null; accessionCode?: string | null; availableCopies: number; totalCopies: number }[];
+  loans?: { id: string; bookId: number; title: string; author: string | null; accessionNo: string | null; issueDate: string; dueDate: string; returnedAt: string | null; status: 'ACTIVE' | 'OVERDUE' | 'RETURNED'; fineAmount: number | null }[];
 }
 
-// ── Fallback Realistic Dataset ───────────────────────────────────────────────
-
-const FALLBACK_PROFILE: StudentProfile = {
-  id: 'std_01',
-  name: 'Aman Kumar',
-  email: 'aman.kumar@college.edu',
-  rollNo: '23CS042',
-  universityRollNo: '0827CS231042',
-  program: 'B.Tech',
-  branch: 'Computer Science & Engineering',
-  semester: 3,
-  section: 'B',
-  cgpa: 8.64,
-  admissionYear: '2023',
-  academicStatus: 'Regular / Active',
-  dob: '2004-08-14',
-  gender: 'Male',
-  bloodGroup: 'B+',
-  nationality: 'Indian',
-  fatherName: 'Rajesh Kumar',
-  motherName: 'Sunita Devi',
-  phone: '+91 98765 43210',
-  address: 'Room 204, Hostal H-3, Campus',
-  permanentAddress: 'Plot 45, Sector 12, Indirapuram, Ghaziabad, UP',
-  emergencyContact: {
-    name: 'Rajesh Kumar',
-    relationship: 'Father',
-    phone: '+91 98765 00000',
-  },
-};
-
-const FALLBACK_TODAY_CLASSES: TodayClass[] = [
-  {
-    id: 'c1',
-    time: '09:00 - 10:00 AM',
-    subject: 'Database Management Systems',
-    faculty: 'Dr. Anita Sharma',
-    room: 'LH-301',
-    type: 'Lecture',
-    status: 'Completed',
-  },
-  {
-    id: 'c2',
-    time: '10:15 - 11:15 AM',
-    subject: 'Operating Systems',
-    faculty: 'Prof. R. K. Verma',
-    room: 'LH-302',
-    type: 'Lecture',
-    status: 'Ongoing',
-  },
-  {
-    id: 'c3',
-    time: '11:30 AM - 01:00 PM',
-    subject: 'OS & Systems Programming Lab',
-    faculty: 'Prof. R. K. Verma / T.A.',
-    room: 'CS Lab 2',
-    type: 'Lab',
-    status: 'Upcoming',
-  },
-  {
-    id: 'c4',
-    time: '02:00 - 03:00 PM',
-    subject: 'Computer Networks',
-    faculty: 'Dr. Vivek Gupta',
-    room: 'LH-305',
-    type: 'Lecture',
-    status: 'Upcoming',
-  },
-];
-
-const FALLBACK_ATTENDANCE: AttendanceSummary = {
-  overallPercentage: 82,
-  totalConducted: 140,
-  totalPresent: 115,
-  totalAbsent: 20,
-  totalLate: 5,
-  minimumRequired: 75,
-  status: 'Good Standing',
-  subjects: [
-    {
-      id: 'sub_1',
-      name: 'Database Management Systems',
-      code: 'CS301',
-      faculty: 'Dr. Anita Sharma',
-      present: 28,
-      conducted: 32,
-      percentage: 88,
-      status: 'Good',
-    },
-    {
-      id: 'sub_2',
-      name: 'Operating Systems',
-      code: 'CS302',
-      faculty: 'Prof. R. K. Verma',
-      present: 25,
-      conducted: 30,
-      percentage: 83,
-      status: 'Good',
-    },
-    {
-      id: 'sub_3',
-      name: 'Computer Networks',
-      code: 'CS303',
-      faculty: 'Dr. Vivek Gupta',
-      present: 24,
-      conducted: 28,
-      percentage: 86,
-      status: 'Good',
-    },
-    {
-      id: 'sub_4',
-      name: 'Theory of Computation',
-      code: 'CS304',
-      faculty: 'Prof. Meenakshi Sundaram',
-      present: 17,
-      conducted: 25,
-      percentage: 68,
-      status: 'Warning',
-    },
-    {
-      id: 'sub_5',
-      name: 'Software Engineering',
-      code: 'CS305',
-      faculty: 'Dr. Priya Nambiar',
-      present: 21,
-      conducted: 25,
-      percentage: 84,
-      status: 'Good',
-    },
-  ],
-  history: [
-    { id: 'h1', date: 'Today, Oct 4', subject: 'Database Management Systems', time: '09:00 AM', status: 'PRESENT' },
-    { id: 'h2', date: 'Yesterday, Oct 3', subject: 'Computer Networks', time: '02:00 PM', status: 'PRESENT' },
-    { id: 'h3', date: 'Yesterday, Oct 3', subject: 'Theory of Computation', time: '11:30 AM', status: 'ABSENT' },
-    { id: 'h4', date: 'Oct 2, 2026', subject: 'Operating Systems', time: '10:15 AM', status: 'PRESENT' },
-    { id: 'h5', date: 'Oct 1, 2026', subject: 'Software Engineering', time: '03:15 PM', status: 'LATE' },
-  ],
-};
-
-const FALLBACK_ASSIGNMENTS: Assignment[] = [
-  {
-    id: 'asgn_1',
-    title: 'ER Diagram & Relational Schema Design',
-    subject: 'Database Management Systems',
-    faculty: 'Dr. Anita Sharma',
-    assignedDate: 'Sep 28, 2026',
-    dueDate: 'Oct 08, 2026',
-    daysLeft: '4 days left',
-    status: 'Pending',
-    marks: '20 Marks',
-    description: 'Design a comprehensive ER diagram and normalize up to BCNF for an E-commerce campus marketplace.',
-  },
-  {
-    id: 'asgn_2',
-    title: 'Process Synchronization using Semaphores',
-    subject: 'Operating Systems',
-    faculty: 'Prof. R. K. Verma',
-    assignedDate: 'Sep 25, 2026',
-    dueDate: 'Oct 05, 2026',
-    daysLeft: 'Tomorrow',
-    status: 'Pending',
-    marks: '15 Marks',
-    description: 'Implement the Dining Philosophers and Producer-Consumer problem in C using POSIX semaphores.',
-  },
-  {
-    id: 'asgn_3',
-    title: 'TCP Socket Client-Server Implementation',
-    subject: 'Computer Networks',
-    faculty: 'Dr. Vivek Gupta',
-    assignedDate: 'Sep 15, 2026',
-    dueDate: 'Sep 28, 2026',
-    status: 'Submitted',
-    marks: 'Pending Evaluation',
-    description: 'Build a multi-threaded chat server in Python with TCP sockets.',
-  },
-  {
-    id: 'asgn_4',
-    title: 'DFA & NFA State Minimization Proofs',
-    subject: 'Theory of Computation',
-    faculty: 'Prof. Meenakshi Sundaram',
-    assignedDate: 'Sep 10, 2026',
-    dueDate: 'Sep 20, 2026',
-    status: 'Evaluated',
-    marks: '18 / 20',
-    description: 'Solve the problem set on Myhill-Nerode theorem and minimize given 5-state automata.',
-  },
-  {
-    id: 'asgn_5',
-    title: 'Agile User Stories & Sprint Backlog',
-    subject: 'Software Engineering',
-    faculty: 'Dr. Priya Nambiar',
-    assignedDate: 'Sep 05, 2026',
-    dueDate: 'Sep 15, 2026',
-    status: 'Overdue',
-    marks: '0 / 10',
-    description: 'Submit Jira user stories with acceptance criteria.',
-  },
-];
-
-const FALLBACK_PROJECTS: Project[] = [
-  {
-    id: 'proj_1',
-    name: 'Smart Campus Attendance with BLE & Geofencing',
-    subject: 'Capstone Project I',
-    mentor: 'Dr. Anita Sharma',
-    team: 'Team Hexa (4 Members)',
-    deadline: 'Nov 20, 2026',
-    progress: 65,
-    status: 'In Progress',
-  },
-  {
-    id: 'proj_2',
-    name: 'Custom Linux Shell with Pipe Redirection',
-    subject: 'Systems Programming Mini Project',
-    mentor: 'Prof. R. K. Verma',
-    team: 'Individual',
-    deadline: 'Oct 25, 2026',
-    progress: 90,
-    status: 'In Progress',
-  },
-];
-
-const FALLBACK_STUDY_PLANS: StudyPlan[] = [
-  {
-    id: 'sp_1',
-    subject: 'Database Management Systems',
-    faculty: 'Dr. Anita Sharma',
-    semester: 'Semester 3',
-    uploadedDate: 'Aug 20, 2026',
-    fileName: 'CS301_Complete_Syllabus_and_Notes.pdf',
-    fileSize: '4.2 MB',
-  },
-  {
-    id: 'sp_2',
-    subject: 'Operating Systems',
-    faculty: 'Prof. R. K. Verma',
-    semester: 'Semester 3',
-    uploadedDate: 'Aug 22, 2026',
-    fileName: 'OS_Unit1_Process_Management.pdf',
-    fileSize: '6.8 MB',
-  },
-  {
-    id: 'sp_3',
-    subject: 'Computer Networks',
-    faculty: 'Dr. Vivek Gupta',
-    semester: 'Semester 3',
-    uploadedDate: 'Sep 01, 2026',
-    fileName: 'CN_Lecture_Slides_OSI_Model.pdf',
-    fileSize: '3.1 MB',
-  },
-];
-
-const FALLBACK_EVENTS: CampusEvent[] = [
-  {
-    id: 'ev_1',
-    name: 'HackUpasthit 2026 — 24hr National Hackathon',
-    description: 'Build solutions for modern campus operations, civic tech, and AI workflows with cash prizes worth ₹1,50,000.',
-    committee: 'CSI Student Chapter & Google Developer Group',
-    date: 'Oct 18, 2026',
-    time: '09:00 AM onwards',
-    venue: 'Auditorium Complex & Central Labs',
-    participants: 340,
-    status: 'Upcoming',
-    category: 'Technical',
-    isRegistered: true,
-  },
-  {
-    id: 'ev_2',
-    name: 'Hands-on Workshop: Cloud Native & Kubernetes',
-    description: 'Master Docker containerization, Kubernetes pods, deployments, and cluster management with industry mentors.',
-    committee: 'ACM Student Chapter',
-    date: 'Oct 12, 2026',
-    time: '02:00 PM - 05:00 PM',
-    venue: 'Seminar Hall 2',
-    participants: 120,
-    status: 'Upcoming',
-    category: 'Workshop',
-    isRegistered: false,
-  },
-  {
-    id: 'ev_3',
-    name: 'Guest Lecture: Agentic AI in Enterprise Software',
-    description: 'Keynote by Senior AI Researcher on the evolution of LLMs, agent pairs, and autonomous tooling.',
-    committee: 'Department of Computer Science',
-    date: 'Oct 09, 2026',
-    time: '11:00 AM - 01:00 PM',
-    venue: 'Main Auditorium',
-    participants: 450,
-    status: 'Upcoming',
-    category: 'Academic',
-    isRegistered: false,
-  },
-  {
-    id: 'ev_4',
-    name: 'Tarang 2026 — Annual Cultural Fest',
-    description: 'Battle of the bands, drama competitions, dance choreography, and celebrity night.',
-    committee: 'Student Council & Cultural Affairs',
-    date: 'Nov 05, 2026',
-    time: '05:00 PM onwards',
-    venue: 'Campus Open Air Amphitheatre',
-    participants: 1200,
-    status: 'Upcoming',
-    category: 'Cultural',
-    isRegistered: true,
-  },
-];
-
-const FALLBACK_NOTIFICATIONS: StudentNotification[] = [
-  {
-    id: 'notif_1',
-    type: 'Academic',
-    title: 'Mid-Semester Examination Schedule Announced',
-    description: 'The Mid-Semester theory examinations for 3rd semester commence on October 26, 2026. Detailed seating plan available.',
-    timestamp: '2 hours ago',
-    read: false,
-  },
-  {
-    id: 'notif_2',
-    type: 'Assignment',
-    title: 'New Assignment Uploaded: DBMS ER Diagram',
-    description: 'Dr. Anita Sharma posted Assignment 2 on Schema Design. Submission deadline is Oct 8, 2026.',
-    timestamp: '5 hours ago',
-    read: false,
-  },
-  {
-    id: 'notif_3',
-    type: 'Attendance',
-    title: 'Low Attendance Alert: Theory of Computation',
-    description: 'Your current attendance in TOC is 68%, which is below the mandatory 75% university criteria.',
-    timestamp: '1 day ago',
-    read: true,
-  },
-  {
-    id: 'notif_4',
-    type: 'Events',
-    title: 'Registration Confirmed: HackUpasthit 2026',
-    description: 'Your team registration for HackUpasthit 2026 has been successfully verified. Check your email for badge pass.',
-    timestamp: '2 days ago',
-    read: true,
-  },
-];
-
-const FALLBACK_FEES: FeeSummary = {
-  totalFee: 85000,
-  paidAmount: 60000,
-  pendingAmount: 25000,
-  dueDate: 'Oct 30, 2026',
-  status: 'PARTIAL',
-  transactions: [
-    {
-      id: 'tx_1',
-      receiptNo: 'REC-2026-0941',
-      date: 'Aug 10, 2026',
-      amount: 60000,
-      mode: 'Online / UPI',
-      status: 'Success',
-    },
-  ],
-};
-
-const FALLBACK_LIBRARY: LibrarySummary = {
-  issuedBooksCount: 2,
-  maxAllowed: 4,
-  fineAmount: 0,
-  books: [
-    {
-      id: 'bk_1',
-      title: 'Database System Concepts (7th Edition)',
-      author: 'Silberschatz, Korth, Sudarshan',
-      accessionNo: 'LIB-CS-4091',
-      issueDate: 'Sep 18, 2026',
-      dueDate: 'Oct 18, 2026',
-      daysRemaining: 14,
-      status: 'ACTIVE',
-    },
-    {
-      id: 'bk_2',
-      title: 'Operating System Concepts',
-      author: 'Abraham Silberschatz & Peter B. Galvin',
-      accessionNo: 'LIB-CS-3812',
-      issueDate: 'Sep 22, 2026',
-      dueDate: 'Oct 22, 2026',
-      daysRemaining: 18,
-      status: 'ACTIVE',
-    },
-  ],
-};
-
-// ── Resilient Request Wrapper ────────────────────────────────────────────────
-
-async function safeApiCall<T>(call: () => Promise<any>, fallbackData: T): Promise<{ data: T }> {
-  try {
-    const res = await call();
-    if (res && res.data !== undefined) {
-      return res;
-    }
-    return { data: fallbackData };
-  } catch (err: any) {
-    // If endpoint doesn't exist yet on backend (404) or network refused, provide realistic data
-    return { data: fallbackData };
-  }
+export interface StudentDocumentRecord {
+  id: string;
+  title: string;
+  type: string;
+  fileName: string;
+  fileUrl: string;
+  status: 'SUBMITTED' | 'VERIFIED' | 'REJECTED';
+  submittedAt: string;
+  reviewerRemarks?: string | null;
 }
 
-// ── API Functions ────────────────────────────────────────────────────────────
-
-export const getStudentDashboard = async () => {
-  try {
-    const res = await api.get('/student/dashboard');
-    if (res.data?.data) {
-      return { data: res.data.data };
-    }
-    return {
-      data: {
-        attendancePercentage: 88,
-        attendanceStatus: 'Good Standing',
-        pendingAssignments: 2,
-        cgpa: 8.64,
-        upcomingTests: 1,
-        todayClassesCount: 4,
-        unreadNotifications: 2,
-      },
-    };
-  } catch (err) {
-    return {
-      data: {
-        attendancePercentage: 88,
-        attendanceStatus: 'Good Standing',
-        pendingAssignments: 2,
-        cgpa: 8.64,
-        upcomingTests: 1,
-        todayClassesCount: 4,
-        unreadNotifications: 2,
-      },
-    };
-  }
-};
-
-function mapStudentProfile(p: any): StudentProfile {
-  const u = p.user || {};
-  const rollNo = p.rollNo === 0 || p.rollNo ? String(p.rollNo) : undefined;
-  const departmentCode = p.department?.code || p.departmentCode || undefined;
-  const departmentName = p.department?.name || p.departmentName || undefined;
-
+function mapStudentProfile(profile: any): StudentProfile {
+  const user = profile.user || {};
+  const departmentCode = profile.department?.code || profile.departmentCode || undefined;
+  const departmentName = profile.department?.name || profile.departmentName || undefined;
   return {
-    id: String(p.id ?? u.id ?? ''),
-    name: u.name || p.name || '',
-    email: u.email || p.email || '',
-    role: u.role || p.role || undefined,
-    rollNo,
-    studentId: p.studentId || undefined,
-    enrollmentNo: p.enrollmentNo || undefined,
-    universityRollNo: p.enrollmentNo || p.studentId || undefined,
+    id: String(profile.id ?? user.id ?? ''),
+    name: user.name || profile.name || '',
+    email: user.email || profile.email || '',
+    role: user.role || profile.role,
+    rollNo: profile.rollNo == null ? undefined : String(profile.rollNo),
+    studentId: profile.studentId || undefined,
+    enrollmentNo: profile.enrollmentNo || undefined,
+    universityRollNo: profile.enrollmentNo || profile.studentId || undefined,
     departmentCode,
     departmentName,
     branch: departmentName || departmentCode,
-    semester: p.semester ?? undefined,
-    division: p.division || undefined,
-    year: p.year || undefined,
-    academicYear: p.academicYear || undefined,
-    admissionYear: p.academicYear || undefined,
-    academicStatus: p.enrollmentStatus || undefined,
-    enrollmentStatus: p.enrollmentStatus || undefined,
-    approvalStatus: u.status || p.approvalStatus || undefined,
-    program: p.program || undefined,
-    dob: p.dob || p.dateOfBirth || undefined,
-    gender: p.gender || undefined,
-    bloodGroup: p.bloodGroup || undefined,
-    nationality: p.nationality || undefined,
-    fatherName: p.fatherName || undefined,
-    motherName: p.motherName || undefined,
-    phone: p.mobileNumber || p.phone || undefined,
-    mobileNumber: p.mobileNumber || p.phone || undefined,
-    address: p.address || undefined,
-    emergencyContact:
-      p.emergencyContact?.name ||
-      p.emergencyContact?.relationship ||
-      p.emergencyContact?.phone ||
-      p.emergencyContactName ||
-      p.emergencyContactRelationship ||
-      p.emergencyContactPhone
-        ? {
-            name: p.emergencyContact?.name || p.emergencyContactName || '',
-            relationship:
-              p.emergencyContact?.relationship || p.emergencyContactRelationship || '',
-            phone: p.emergencyContact?.phone || p.emergencyContactPhone || '',
-          }
-        : undefined,
+    semester: profile.semester ?? undefined,
+    division: profile.division || undefined,
+    year: profile.year || undefined,
+    academicYear: profile.academicYear || undefined,
+    admissionYear: profile.academicYear || undefined,
+    academicStatus: profile.enrollmentStatus || undefined,
+    enrollmentStatus: profile.enrollmentStatus || undefined,
+    approvalStatus: user.status || profile.approvalStatus || undefined,
+    program: profile.program || undefined,
+    dob: profile.dob || profile.dateOfBirth || undefined,
+    gender: profile.gender || undefined,
+    bloodGroup: profile.bloodGroup || undefined,
+    nationality: profile.nationality || undefined,
+    fatherName: profile.fatherName || undefined,
+    motherName: profile.motherName || undefined,
+    phone: profile.mobileNumber || profile.phone || undefined,
+    mobileNumber: profile.mobileNumber || profile.phone || undefined,
+    address: profile.address || undefined,
+    emergencyContact: profile.emergencyContact || undefined,
   };
 }
 
+export const getStudentDashboard = async () => {
+  const res = await api.get('/student/dashboard');
+  if (!res.data?.data) throw new Error('Student dashboard data is unavailable.');
+  return { data: res.data.data };
+};
+
 export const getStudentProfile = async (): Promise<{ data: StudentProfile }> => {
   const res = await api.get('/student/profile');
-  const p = res.data?.profile;
-
-  if (!p) {
-    throw new Error('Student profile not found');
-  }
-
-  return { data: mapStudentProfile(p) };
+  if (!res.data?.profile) throw new Error('Student profile not found.');
+  return { data: mapStudentProfile(res.data.profile) };
 };
 
-export const updateStudentProfile = (payload: Partial<StudentProfile>) =>
-  api.patch('/student/profile', payload).catch(() => ({ data: { ...FALLBACK_PROFILE, ...payload } }));
+export const updateStudentProfile = (payload: Partial<StudentProfile>) => api.patch('/student/profile', payload);
+
+export const getStudentSubjects = async () => {
+  const res = await api.get('/student/subjects');
+  return { data: { enrollments: res.data?.enrollments ?? [] } };
+};
 
 export const getStudentAttendance = async (): Promise<{ data: AttendanceSummary }> => {
-  try {
-    const res = await api.get('/student/attendance');
-    if (res.data?.data) {
-      return { data: res.data.data };
-    }
-    return { data: FALLBACK_ATTENDANCE };
-  } catch (err) {
-    return { data: FALLBACK_ATTENDANCE };
-  }
+  const res = await api.get('/student/attendance');
+  if (!res.data?.data) throw new Error('Attendance data is unavailable.');
+  return { data: res.data.data };
 };
 
-export const getSubjectAttendance = (subjectId: string) =>
-  safeApiCall(
-    () => api.get(`/student/attendance/${subjectId}`),
-    FALLBACK_ATTENDANCE.subjects.find((s) => s.id === subjectId) || FALLBACK_ATTENDANCE.subjects[0]
-  );
+export const getSubjectAttendance = async (subjectId: string) => {
+  const { data } = await getStudentAttendance();
+  return { data: data.subjects.find((subject) => subject.id === subjectId) ?? null };
+};
 
-export const getStudentTimetable = (params?: { semester?: string; week?: string }) =>
-  safeApiCall(() => api.get('/student/timetable', { params }), {
-    days: {
-      Monday: FALLBACK_TODAY_CLASSES,
-      Tuesday: FALLBACK_TODAY_CLASSES,
-      Wednesday: FALLBACK_TODAY_CLASSES,
-      Thursday: FALLBACK_TODAY_CLASSES,
-      Friday: FALLBACK_TODAY_CLASSES,
-    },
-  });
+export const getStudentTimetable = async (params?: { semester?: string; week?: string }) => {
+  const res = await api.get('/student/timetable', { params });
+  return { data: res.data?.data ?? res.data };
+};
 
 export const getTodayClasses = async (): Promise<{ data: { classes: TodayClass[] } }> => {
-  try {
-    const res = await api.get('/student/subjects');
-    const enrollments = res.data?.enrollments || [];
-    if (enrollments.length > 0) {
-      const times = [
-        '09:00 - 10:00 AM',
-        '10:15 - 11:15 AM',
-        '11:30 AM - 01:00 PM',
-        '02:00 - 03:00 PM',
-      ];
-      const rooms = ['LH-301', 'LH-302', 'CS Lab 2', 'LH-305'];
-      const statuses: ('Completed' | 'Ongoing' | 'Upcoming')[] = [
-        'Completed',
-        'Ongoing',
-        'Upcoming',
-        'Upcoming',
-      ];
-
-      const classes: TodayClass[] = enrollments.slice(0, 4).map((en: any, idx: number) => {
-        const sub = en.subject;
-        const facultyName =
-          sub.facultyAssignments?.[0]?.faculty?.user?.name || 'Department Faculty';
-        return {
-          id: `cls_${sub.id}`,
-          time: times[idx] || '03:00 - 04:00 PM',
-          subject: sub.subjectName,
-          faculty: facultyName,
-          room: rooms[idx] || 'LH-101',
-          type: sub.subjectType === 'PRACTICAL' ? 'Lab' : 'Lecture',
-          status: statuses[idx] || 'Upcoming',
-        };
-      });
-      return { data: { classes } };
-    }
-    return { data: { classes: FALLBACK_TODAY_CLASSES } };
-  } catch (err) {
-    return { data: { classes: FALLBACK_TODAY_CLASSES } };
-  }
+  const res = await api.get('/student/timetable/today');
+  const entries = res.data?.entries ?? [];
+  return { data: { classes: entries.map((entry: any) => ({
+    id: String(entry.id), time: entry.time || `${entry.startTime} - ${entry.endTime}`,
+    subject: entry.subject?.subjectName || entry.subject || '',
+    faculty: entry.faculty?.user?.name || entry.faculty || '', room: entry.room || null,
+    type: entry.sessionType === 'LAB' || entry.type === 'Lab' ? 'Lab' : entry.sessionType === 'TUTORIAL' || entry.type === 'Tutorial' ? 'Tutorial' : 'Lecture',
+  })) } };
 };
 
-export const getStudentAssignments = () =>
-  safeApiCall(() => api.get('/student/assignments'), { assignments: FALLBACK_ASSIGNMENTS });
-
-export const getAssignmentDetails = (id: string) =>
-  safeApiCall(
-    () => api.get(`/student/assignments/${id}`),
-    FALLBACK_ASSIGNMENTS.find((a) => a.id === id) || FALLBACK_ASSIGNMENTS[0]
-  );
-
-export const getStudentProjects = () =>
-  safeApiCall(() => api.get('/student/projects'), { projects: FALLBACK_PROJECTS });
-
-export const getStudentStudyPlans = () =>
-  safeApiCall(() => api.get('/student/study-plans'), { studyPlans: FALLBACK_STUDY_PLANS });
-
-export const getStudentRequests = () =>
-  safeApiCall(() => api.get('/student/requests'), {
-    requests: [
-      {
-        id: 'req_1',
-        type: 'Medical Leave Application',
-        appliedDate: 'Sep 29, 2026',
-        reason: 'Viral fever for 3 days with doctor certificate',
-        status: 'Approved',
-      },
-      {
-        id: 'req_2',
-        type: 'Bonafide Certificate Request',
-        appliedDate: 'Oct 02, 2026',
-        reason: 'Required for state education scholarship application',
-        status: 'Under Review',
-      },
-    ],
-  });
-
-export const submitStudentRequest = (payload: any) =>
-  api.post('/student/requests', payload).catch(() => ({ data: { success: true, message: 'Request submitted' } }));
-
-export const getStudentEvents = () =>
-  safeApiCall(() => api.get('/student/events'), { events: FALLBACK_EVENTS });
-
-export const registerForEvent = (eventId: string) =>
-  api.post(`/student/events/${eventId}/register`).catch(() => ({ data: { success: true, message: 'Registered' } }));
-
-export const getStudentNotifications = () =>
-  safeApiCall(() => api.get('/student/notifications'), { notifications: FALLBACK_NOTIFICATIONS });
-
+export const getStudentAssignments = async () => {
+  const res = await api.get('/student/assignments');
+  return { data: res.data?.data ?? res.data };
+};
+export const getAssignmentDetails = async (id: string) => api.get(`/student/assignments/${id}`);
+export const submitStudentAssignment = (id: string, payload: { responseText?: string; attachmentUrl?: string; attachmentName?: string }) =>
+  api.post(`/student/assignments/${id}/submissions`, payload);
+export const getStudentProjects = async () => {
+  const res = await api.get('/student/projects');
+  return { data: res.data?.data ?? res.data };
+};
+export const getStudentStudyPlans = async () => {
+  const res = await api.get('/student/study-plans');
+  return { data: res.data?.data ?? res.data };
+};
+export const getStudentRequests = async () => {
+  const res = await api.get('/student/requests');
+  const mapStatus: Record<string, string> = { PENDING: 'Pending', UNDER_REVIEW: 'Under Review', APPROVED: 'Approved', REJECTED: 'Rejected', SENT_BACK: 'Sent Back' };
+  const data = res.data?.data ?? res.data;
+  return { data: { ...data, requests: (data?.requests ?? []).map((request: any) => ({ ...request, status: mapStatus[request.status] || request.status })) } };
+};
+export const submitStudentRequest = async (payload: any) => {
+  const res = await api.post('/student/requests', payload);
+  const request = res.data?.request;
+  const mapStatus: Record<string, string> = { PENDING: 'Pending', UNDER_REVIEW: 'Under Review', APPROVED: 'Approved', REJECTED: 'Rejected', SENT_BACK: 'Sent Back' };
+  return { ...res, data: { ...res.data, request: request ? { ...request, status: mapStatus[request.status] || request.status } : null } };
+};
+export const getStudentEvents = async () => {
+  const res = await api.get('/student/events');
+  return { data: res.data?.data ?? res.data };
+};
+export const registerForEvent = (eventId: string) => api.post(`/student/events/${eventId}/register`);
+export const cancelEventRegistration = (eventId: string) => api.delete(`/student/events/${eventId}/register`);
+export const getStudentNotifications = async () => {
+  const res = await api.get('/student/notifications');
+  return { data: res.data?.data ?? res.data };
+};
+export const markStudentNotificationRead = (id: string) => api.patch(`/student/notifications/${encodeURIComponent(id)}/read`);
 export const getStudentFees = async (): Promise<{ data: FeeSummary | null }> => {
-  try {
-    const res = await api.get('/student/fees');
-    const payload = res.data?.data ?? res.data?.fees ?? null;
-    return { data: payload && typeof payload === 'object' ? payload : null };
-  } catch {
-    return { data: null };
-  }
+  const res = await api.get('/student/fees');
+  return { data: res.data?.data ?? res.data?.fees ?? null };
+};
+export const getStudentDocuments = async () => {
+  const res = await api.get('/student/documents');
+  return { data: { documents: res.data?.data?.documents ?? [] } };
+};
+export const getStudentLibrary = async (): Promise<{ data: LibrarySummary | null }> => {
+  const res = await api.get('/student/library');
+  return { data: res.data?.data ?? res.data?.library ?? null };
 };
 
-export const getStudentLibrary = async (): Promise<{ data: LibrarySummary | null }> => {
-  try {
-    const res = await api.get('/student/library');
-    const payload = res.data?.data ?? res.data?.library ?? null;
-    return { data: payload && typeof payload === 'object' ? payload : null };
-  } catch {
-    return { data: null };
+export const getActiveStudentAttendanceSessions = async () => {
+  const res = await api.get('/student/attendance/sessions/active');
+  const receivedAt = Date.now();
+  const sessions = (res.data?.sessions ?? []) as ActiveAttendanceSession[];
+  return {
+    data: {
+      sessions: sessions.map((session) => ({
+        ...session,
+        serverClockOffsetMs: receivedAt - new Date(session.serverTime).getTime(),
+      })),
+    },
+  };
+};
+
+export const checkInToAttendanceSession = async (sessionId: number, code: string) => {
+  const res = await api.post(`/student/attendance/sessions/${sessionId}/check-in`, { code });
+  if (res.data?.success !== true || res.data?.status !== 'PRESENT') {
+    throw new Error(res.data?.message || 'Attendance check-in was not confirmed by the server.');
   }
+  return { data: res.data as { success: true; status: 'PRESENT'; alreadyCheckedIn: boolean; checkedInAt: string | null } };
 };

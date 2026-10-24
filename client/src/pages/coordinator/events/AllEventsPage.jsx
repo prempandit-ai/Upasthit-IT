@@ -11,18 +11,13 @@ import {
   PlusIcon,
   Squares2X2Icon,
   ListBulletIcon,
-  CalendarDaysIcon,
-  MapPinIcon,
-  ClockIcon,
-  UserGroupIcon,
-  AcademicCapIcon,
-  ArrowRightIcon,
 } from '@heroicons/react/24/outline';
 
 const AllEventsPage = () => {
   const navigate = useNavigate();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -35,15 +30,13 @@ const AllEventsPage = () => {
 
   const loadEvents = async () => {
     setLoading(true);
+    setLoadError('');
     try {
-      const data = await getEvents({
-        status: statusFilter,
-        type: typeFilter,
-        search,
-      });
+      const data = await getEvents();
       setEvents(data);
     } catch (err) {
       console.error(err);
+      setLoadError(err?.response?.data?.message || err?.message || 'Unable to load event records.');
     } finally {
       setLoading(false);
     }
@@ -54,13 +47,12 @@ const AllEventsPage = () => {
   };
 
   const filteredEvents = events.filter((e) => {
+    if (statusFilter !== 'All' && e.status !== statusFilter) return false;
+    if (typeFilter !== 'All' && e.type !== typeFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return (
-      e.name.toLowerCase().includes(q) ||
-      e.department.toLowerCase().includes(q) ||
-      e.venue?.toLowerCase().includes(q)
-    );
+    return [e.name, e.department, e.venue, e.academicYear]
+      .some((value) => String(value || '').toLowerCase().includes(q));
   });
 
   const totalEvents = events.length;
@@ -116,6 +108,13 @@ const AllEventsPage = () => {
           </div>
         }
       />
+
+      {loadError && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <span>{loadError}</span>
+          <button type="button" onClick={loadEvents} className="font-semibold underline">Retry</button>
+        </div>
+      )}
 
       {/* Mini Stats Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -178,7 +177,9 @@ const AllEventsPage = () => {
       />
 
       {/* Events View (Grid or Table) */}
-      {filteredEvents.length === 0 ? (
+      {loading ? (
+        <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading events…</p>
+      ) : loadError ? null : filteredEvents.length === 0 ? (
         <EmptyState
           title="No events found"
           description="Try adjusting your search criteria or create a brand new event."

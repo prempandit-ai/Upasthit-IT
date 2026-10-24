@@ -61,7 +61,7 @@ const ParticipantTable = ({
     {
       key: 'attendanceStatus',
       label: 'Attendance',
-      render: (val) => <StatusBadge status={val} size="xs" />,
+      render: (val) => val ? <StatusBadge status={val} size="xs" /> : <span className="text-xs text-slate-400">Not tracked</span>,
     },
     {
       key: 'actions',

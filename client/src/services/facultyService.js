@@ -30,6 +30,14 @@ export const exportSchedule = (params) => api.get('/api/faculty/schedule/export'
 // ── Notifications ─────────────────────────────────────────────────────────────
 export const getFacultyNotifications = () => api.get('/api/faculty/notifications');
 
+// Database-backed academic portal modules
+export const getFacultyTimetable = () => api.get('/api/faculty/timetable');
+export const createFacultyTimetableEntry = (payload) => api.post('/api/faculty/timetable', payload);
+export const deleteFacultyTimetableEntry = (id) => api.delete(`/api/faculty/timetable/${id}`);
+export const getFacultyStudyPlans = () => api.get('/api/faculty/study-plans');
+export const createFacultyStudyPlan = (payload) => api.post('/api/faculty/study-plans', payload);
+export const publishFacultyStudyPlan = (id) => api.patch(`/api/faculty/study-plans/${id}/publish`);
+
 const ATTENDANCE_SESSION_STORAGE_KEY = 'upasthit.attendance.activeSessionId';
 
 export const getAttendanceErrorMessage = (error, fallback = 'Something went wrong. Please try again.') => {
@@ -119,6 +127,8 @@ export const createAssignment = (payload) => api.post('/api/faculty/assignments'
 export const updateAssignment = (id, payload) => api.patch(`/api/faculty/assignments/${id}`, payload);
 export const deleteAssignment = (id) => api.delete(`/api/faculty/assignments/${id}`);
 export const getAssignmentSubmissions = (id) => api.get(`/api/faculty/assignments/${id}/submissions`);
+export const reviewAssignmentSubmission = (assignmentId, submissionId, payload) =>
+  api.patch(`/api/faculty/assignments/${assignmentId}/submissions/${submissionId}/review`, payload);
 export const getRecentSubmissions = () => api.get('/api/faculty/assignments/recent-submissions');
 
 // ── Events ────────────────────────────────────────────────────────────────────

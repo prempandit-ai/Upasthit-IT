@@ -53,6 +53,54 @@ enum AttendanceStatus {
   ABSENT
 }
 
+enum TimetableSessionType {
+  LECTURE
+  LAB
+  TUTORIAL
+}
+
+enum AcademicAssignmentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum StudyPlanStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SENT_BACK
+}
+
+enum CampusEventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+enum EventRegistrationStatus {
+  REGISTERED
+  CANCELLED
+}
+
+enum StudentDocumentStatus {
+  SUBMITTED
+  VERIFIED
+  REJECTED
+}
+
+enum FeePaymentStatus {
+  RECORDED
+  VOID
+}
+
 // ─── Core Auth Table (UNCHANGED) ─────────────────────────────────────────────
 
 model User {
@@ -74,6 +122,16 @@ model User {
   hodProfile         HODProfile?
   coordinatorProfile CoordinatorProfile?
   adminProfile       AdminProfile?
+
+  notifications       StudentNotification[]
+  authoredAssignments AcademicAssignment[] @relation("AssignmentAuthor")
+  leaveReviews        LeaveRequestReview[] @relation("LeaveReviewer")
+  createdTimetables   TimetableEntry[] @relation("TimetableCreator")
+  createdEvents       CampusEvent[] @relation("EventCreator")
+  reviewedDocuments   StudentDocument[] @relation("DocumentReviewer")
+  createdFeeCharges   StudentFeeCharge[] @relation("FeeChargeCreator")
+  issuedLibraryLoans  LibraryLoan[] @relation("LibraryIssuer")
+  receivedLibraryLoans LibraryLoan[] @relation("LibraryReturner")
 
   // Approval audit
   approvalsMade     ApprovalLog[] @relation("ReviewerApprovals")
@@ -136,6 +194,13 @@ model StudentProfile {
 
   subjectEnrollments StudentSubjectEnrollment[]
   attendanceRecords  AttendanceRecord[]
+  assignmentSubmissions AssignmentSubmission[]
+  leaveRequests       LeaveRequest[]
+  eventRegistrations  EventRegistration[]
+  documents           StudentDocument[]
+  feeCharges          StudentFeeCharge[]
+  feePayments         StudentFeePayment[]
+  libraryLoans        LibraryLoan[]
 
   @@index([departmentId])
   @@index([academicYear, semester])
@@ -161,6 +226,10 @@ model FacultyProfile {
   updatedAt DateTime @updatedAt
 
   subjectAssignments FacultySubjectAssignment[]
+  timetableEntries   TimetableEntry[]
+  academicAssignments AcademicAssignment[]
+  studyPlans         StudyPlan[]
+  eventAssignments   EventFacultyAssignment[]
 
   @@index([departmentId])
 }
@@ -234,6 +303,9 @@ model Subject {
 
   facultyAssignments FacultySubjectAssignment[]
   studentEnrollments StudentSubjectEnrollment[]
+  timetableEntries   TimetableEntry[]
+  academicAssignments AcademicAssignment[]
+  studyPlans         StudyPlan[]
 
   @@index([departmentId, semester, academicYear])
 }
@@ -343,4 +415,314 @@ model AttendanceRecord {
 
   @@unique([sessionId, studentId])
   @@index([studentId])
+}
+
+model TimetableEntry {
+  id           Int                  @id @default(autoincrement())
+  academicYear String
+  year         Year
+  semester     Int
+  division     String
+  labBatch     String?
+  dayOfWeek    Int
+  startTime    String
+  endTime      String
+  room         String?
+  sessionType  TimetableSessionType
+  subjectId    Int
+  facultyId    Int
+  createdById  String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  subject   Subject       @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  faculty   FacultyProfile @relation(fields: [facultyId], references: [id], onDelete: Restrict)
+  createdBy User          @relation("TimetableCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([academicYear, year, semester, division, dayOfWeek])
+  @@index([facultyId, dayOfWeek])
+}
+
+model AcademicAssignment {
+  id               Int                       @id @default(autoincrement())
+  subjectId        Int
+  facultyId        Int
+  authorUserId     String
+  academicYear     String
+  year             Year
+  semester         Int
+  division         String?
+  labBatch         String?
+  title            String
+  description      String?
+  attachmentUrl    String?
+  attachmentName  String?
+  dueAt            DateTime
+  maxMarks         Decimal?                  @db.Decimal(8, 2)
+  status           AcademicAssignmentStatus  @default(DRAFT)
+  allowResubmission Boolean                 @default(false)
+  publishedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  subject     Subject                @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  faculty     FacultyProfile         @relation(fields: [facultyId], references: [id], onDelete: Restrict)
+  author      User                   @relation("AssignmentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  submissions AssignmentSubmission[]
+
+  @@index([facultyId, status, dueAt])
+  @@index([academicYear, year, semester, division, labBatch, status])
+}
+
+model AssignmentSubmission {
+  id               Int       @id @default(autoincrement())
+  assignmentId     Int
+  studentId        Int
+  responseText     String?
+  attachmentUrl    String?
+  attachmentName  String?
+  submittedAt      DateTime  @default(now())
+  marks            Decimal?  @db.Decimal(8, 2)
+  feedback         String?
+  feedbackReleased Boolean   @default(false)
+  updatedAt        DateTime  @updatedAt
+
+  assignment AcademicAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student    StudentProfile     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId, submittedAt])
+}
+
+model StudyPlan {
+  id           Int            @id @default(autoincrement())
+  subjectId    Int
+  facultyId    Int
+  academicYear String
+  year         Year
+  semester     Int
+  division     String?
+  title        String
+  description  String?
+  fileUrl      String?
+  fileName     String?
+  version      Int            @default(1)
+  status       StudyPlanStatus @default(DRAFT)
+  publishedAt  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  subject Subject        @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  faculty FacultyProfile @relation(fields: [facultyId], references: [id], onDelete: Restrict)
+
+  @@unique([subjectId, academicYear, year, semester, version])
+  @@index([academicYear, year, semester, division, status])
+}
+
+model LeaveRequest {
+  id          Int               @id @default(autoincrement())
+  studentId   Int
+  leaveType   String
+  clientRequestId String?
+  startDate   DateTime          @db.Date
+  endDate     DateTime          @db.Date
+  reason      String
+  attachmentUrl String?
+  status      LeaveRequestStatus @default(PENDING)
+  submittedAt DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  student StudentProfile        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reviews LeaveRequestReview[]
+
+  @@index([studentId, submittedAt])
+  @@index([status, submittedAt])
+  @@unique([studentId, clientRequestId])
+}
+
+model LeaveRequestReview {
+  id             Int      @id @default(autoincrement())
+  leaveRequestId Int
+  reviewerId     String
+  action         String
+  remarks        String?
+  createdAt      DateTime @default(now())
+
+  leaveRequest LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+  reviewer     User         @relation("LeaveReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+
+  @@index([leaveRequestId, createdAt])
+}
+
+model CampusEvent {
+  id                    Int              @id @default(autoincrement())
+  createdById           String
+  name                  String
+  category              String?
+  description           String?
+  organizer             String?
+  venue                 String?
+  startsAt              DateTime
+  endsAt                DateTime?
+  registrationOpensAt   DateTime?
+  registrationDeadline DateTime?
+  cancellationDeadline DateTime?
+  capacity              Int?
+  allowCancellation     Boolean          @default(false)
+  targetAcademicYear    String?
+  targetYear            Year?
+  targetDivision        String?
+  targetLabBatch        String?
+  status                CampusEventStatus @default(DRAFT)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  createdBy     User                @relation("EventCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  registrations EventRegistration[]
+  facultyAssignments EventFacultyAssignment[]
+
+  @@index([status, startsAt])
+  @@index([targetAcademicYear, targetYear, targetDivision, targetLabBatch])
+}
+
+model EventRegistration {
+  id           Int                     @id @default(autoincrement())
+  eventId      Int
+  studentId    Int
+  status       EventRegistrationStatus @default(REGISTERED)
+  registeredAt DateTime                @default(now())
+  cancelledAt  DateTime?
+
+  event   CampusEvent    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, studentId])
+  @@index([studentId, status])
+}
+
+model EventFacultyAssignment {
+  id             Int      @id @default(autoincrement())
+  eventId        Int
+  facultyId      Int
+  responsibility String
+  createdAt      DateTime @default(now())
+
+  event   CampusEvent    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  faculty FacultyProfile @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, facultyId])
+  @@index([facultyId])
+}
+
+model StudentNotification {
+  id          String   @id @default(cuid())
+  recipientId String
+  type        String
+  title       String
+  body        String
+  dedupeKey   String
+  relatedUrl  String?
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  recipient User @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, dedupeKey])
+  @@index([recipientId, readAt, createdAt])
+}
+
+model StudentDocument {
+  id             Int                  @id @default(autoincrement())
+  studentId      Int
+  title          String
+  documentType   String
+  fileName       String
+  mimeType       String
+  sizeBytes      BigInt
+  fileUrl        String
+  status         StudentDocumentStatus @default(SUBMITTED)
+  reviewerId     String?
+  reviewerRemarks String?
+  submittedAt    DateTime             @default(now())
+  reviewedAt     DateTime?
+
+  student  StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reviewer User?          @relation("DocumentReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, submittedAt])
+}
+
+model StudentFeeCharge {
+  id           Int      @id @default(autoincrement())
+  studentId    Int
+  createdById  String
+  title        String
+  academicYear String
+  amount       Decimal  @db.Decimal(12, 2)
+  dueDate      DateTime? @db.Date
+  createdAt    DateTime @default(now())
+
+  student   StudentProfile       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy User                 @relation("FeeChargeCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  payments  StudentFeePayment[]
+
+  @@index([studentId, academicYear, dueDate])
+}
+
+model StudentFeePayment {
+  id            Int              @id @default(autoincrement())
+  studentId     Int
+  chargeId      Int?
+  receiptNumber String           @unique
+  amount        Decimal          @db.Decimal(12, 2)
+  paymentMethod String?
+  paidAt        DateTime         @default(now())
+  status        FeePaymentStatus @default(RECORDED)
+  receiptUrl    String?
+
+  student StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  charge  StudentFeeCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, paidAt])
+}
+
+model LibraryBook {
+  id            Int      @id @default(autoincrement())
+  isbn          String?  @unique
+  accessionCode String?  @unique
+  title         String
+  author        String?
+  publisher     String?
+  category      String?
+  totalCopies   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  loans LibraryLoan[]
+}
+
+model LibraryLoan {
+  id           Int       @id @default(autoincrement())
+  bookId       Int
+  studentId    Int
+  issuedById   String
+  returnedToId String?
+  issuedAt     DateTime  @default(now())
+  dueAt        DateTime
+  returnedAt   DateTime?
+
+  book       LibraryBook   @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  student    StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  issuedBy   User          @relation("LibraryIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+  returnedTo User?         @relation("LibraryReturner", fields: [returnedToId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, returnedAt, dueAt])
+  @@index([bookId, returnedAt])
+}
+
+model LibraryPolicy {
+  id                Int      @id @default(1)
+  maxActiveLoans    Int      @default(0)
+  finePerDay        Decimal? @db.Decimal(8, 2)
+  updatedAt         DateTime @updatedAt
 }

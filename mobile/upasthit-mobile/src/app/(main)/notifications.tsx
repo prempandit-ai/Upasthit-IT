@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,6 +19,7 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
 import {
   getStudentNotifications,
+  markStudentNotificationRead,
   StudentNotification,
 } from '@/services/studentService';
 
@@ -28,13 +30,16 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<NotifFilter>('ALL');
+  const [notificationsError, setNotificationsError] = useState('');
 
   const fetchData = async () => {
     try {
       const res = await getStudentNotifications();
       setNotifications(res.data?.notifications ?? []);
-    } catch (_) {
-      // safe fallback
+      setNotificationsError('');
+    } catch {
+      setNotifications([]);
+      setNotificationsError('Notifications are unavailable because no student notifications service is connected.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -50,14 +55,15 @@ export default function NotificationsScreen() {
     fetchData();
   };
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
-
-  const markSingleAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  const handleMarkRead = async (notification: StudentNotification) => {
+    if (notification.read) return;
+    try {
+      const response = await markStudentNotificationRead(notification.id);
+      if (response.data?.success !== true || response.data?.read !== true) throw new Error('The server did not confirm the update.');
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read: true } : item));
+    } catch (error: any) {
+      Alert.alert('Could not mark as read', error?.response?.data?.message || error?.message || 'Please try again.');
+    }
   };
 
   const filteredNotifs = notifications.filter((n) => {
@@ -81,17 +87,10 @@ export default function NotificationsScreen() {
           <View style={styles.headerTitles}>
             <ThemedText style={styles.headerTitle}>Notifications</ThemedText>
             <ThemedText style={styles.headerSubtitle}>
-              {unreadCount > 0 ? `${unreadCount} unread notices` : 'All caught up'}
+              {notificationsError || (unreadCount > 0 ? `${unreadCount} unread notices` : 'No unread notices')}
             </ThemedText>
           </View>
 
-          {unreadCount > 0 && (
-            <Pressable
-              style={({ pressed }) => [styles.markReadBtn, pressed && styles.pressed]}
-              onPress={markAllAsRead}>
-              <ThemedText style={styles.markReadText}>Mark all read</ThemedText>
-            </Pressable>
-          )}
         </View>
 
         {/* ── Filter Chips ── */}
@@ -136,7 +135,9 @@ export default function NotificationsScreen() {
                 colors={[Navy.primary]}
               />
             }>
-            {filteredNotifs.length === 0 ? (
+            {notificationsError ? (
+              <EmptyState icon="alert-circle-outline" title="Notifications Unavailable" message={notificationsError} />
+            ) : filteredNotifs.length === 0 ? (
               <EmptyState
                 icon="notifications-off-outline"
                 title="No Notifications"
@@ -146,12 +147,12 @@ export default function NotificationsScreen() {
               filteredNotifs.map((n) => (
                 <Pressable
                   key={n.id}
-                  style={({ pressed }) => [
+                  style={[
                     styles.notifCard,
                     !n.read && styles.notifCardUnread,
-                    pressed && styles.pressed,
                   ]}
-                  onPress={() => markSingleAsRead(n.id)}>
+                  onPress={() => handleMarkRead(n)}
+                  >
                   <View style={styles.notifTopRow}>
                     <View style={styles.badgeWrap}>
                       <StatusBadge

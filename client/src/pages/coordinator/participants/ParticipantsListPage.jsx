@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageHeader from '../../../components/shared/PageHeader';
 import FilterBar from '../../../components/shared/FilterBar';
@@ -11,9 +11,6 @@ import {
   UserPlusIcon,
   ArrowUpTrayIcon,
   ArrowDownTrayIcon,
-  AcademicCapIcon,
-  CheckCircleIcon,
-  XCircleIcon,
 } from '@heroicons/react/24/outline';
 
 const ParticipantsListPage = () => {
@@ -25,23 +22,25 @@ const ParticipantsListPage = () => {
   const [participants, setParticipants] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [selectedEventId, setSelectedEventId] = useState(initialEventId);
   const [selectedDept, setSelectedDept] = useState('All');
   const [search, setSearch] = useState('');
   const [selectedParticipant, setSelectedParticipant] = useState(null);
+  const searchRef = useRef(search);
+  const filteredParticipants = participants.filter((participant) => selectedDept === 'All' || participant.department === selectedDept);
 
-  useEffect(() => {
-    loadData();
-  }, [selectedEventId, selectedDept]);
+  useEffect(() => { searchRef.current = search; }, [search]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [partsData, evtsData] = await Promise.all([
         getParticipants({
           eventId: selectedEventId,
           department: selectedDept,
-          search,
+          search: searchRef.current,
         }),
         getEvents(),
       ]);
@@ -49,10 +48,13 @@ const ParticipantsListPage = () => {
       setEvents(evtsData);
     } catch (err) {
       console.error(err);
+      setLoadError(err?.response?.data?.message || err?.message || 'Unable to load registrations.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedEventId, selectedDept]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleExportCSV = () => {
     if (participants.length === 0) {
@@ -62,7 +64,7 @@ const ParticipantsListPage = () => {
 
     const headers = ['Student ID,Name,Email,Department,Year,Division,Event,Registration Status,Attendance Status'];
     const rows = participants.map((p) =>
-      `"${p.studentId}","${p.name}","${p.email}","${p.department}","${p.year}","${p.division}","${p.event}","${p.registrationStatus}","${p.attendanceStatus}"`
+      `"${p.studentId}","${p.name}","${p.email}","${p.department}","${p.year}","${p.division}","${p.event}","${p.registrationStatus}","${p.attendanceStatus || 'Not tracked'}"`
     );
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -118,6 +120,8 @@ const ParticipantsListPage = () => {
         }
       />
 
+      {loadError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}<button type="button" onClick={loadData} className="ml-3 font-semibold underline">Retry</button></p>}
+
       {/* Filter and Search Bar */}
       <FilterBar
         search={search}
@@ -156,7 +160,7 @@ const ParticipantsListPage = () => {
 
       {/* Participant Data Table */}
       <ParticipantTable
-        participants={participants}
+        participants={filteredParticipants}
         loading={loading}
         onViewDetails={(p) => setSelectedParticipant(p)}
       />
@@ -217,7 +221,7 @@ const ParticipantsListPage = () => {
               </div>
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3">
                 <span className="text-slate-600 font-medium">Event Attendance:</span>
-                <StatusBadge status={selectedParticipant.attendanceStatus} />
+                {selectedParticipant.attendanceStatus ? <StatusBadge status={selectedParticipant.attendanceStatus} /> : <span className="text-slate-500">Not tracked</span>}
               </div>
             </div>
           </div>

@@ -30,4 +30,4 @@ export const registerRequest = (payload: Record<string, unknown>) =>
   api.post<AuthResponse>('/auth/register', payload);
 
 export const getMeRequest = () =>
-  api.get<{ success: boolean; user: AuthUser }>('/auth/me');
+  api.get<{ success: boolean; user: AuthUser }>('/auth/me', { timeout: 15000 });

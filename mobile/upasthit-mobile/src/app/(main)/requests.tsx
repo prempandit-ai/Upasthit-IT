@@ -37,15 +37,21 @@ export default function RequestsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [reqType, setReqType] = useState('Medical Leave Application');
   const [reqReason, setReqReason] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [clientRequestId, setClientRequestId] = useState(() => `leave-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const [submitting, setSubmitting] = useState(false);
+  const [requestsError, setRequestsError] = useState('');
 
   const fetchData = async () => {
     try {
       const res = await getStudentRequests();
       const list = (res.data?.requests ?? []) as StudentRequest[];
       setRequests(list);
-    } catch (_) {
-      // safe fallback
+      setRequestsError('');
+    } catch {
+      setRequests([]);
+      setRequestsError('Requests are unavailable because no student requests service is connected.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -66,25 +72,27 @@ export default function RequestsScreen() {
       Alert.alert('Missing Reason', 'Please provide a brief justification for your request.');
       return;
     }
+    if (!startDate || !endDate || endDate < startDate) {
+      Alert.alert('Dates required', 'Enter valid start and end dates for your leave request.');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      const newReqPayload: StudentRequest = {
-        id: `req_${Date.now()}`,
-        type: reqType,
-        appliedDate: 'Just now',
-        reason: reqReason.trim(),
-        status: 'Pending',
-      };
-
-      await submitStudentRequest(newReqPayload);
-
-      setRequests((prev) => [newReqPayload, ...prev]);
+      const response = await submitStudentRequest({ type: reqType, reason: reqReason.trim(), startDate, endDate, clientRequestId });
+      const createdRequest = response.data?.request || response.data?.data?.request;
+      if (response.data?.success !== true || !createdRequest?.id) {
+        throw new Error('The server did not confirm and return the created request.');
+      }
+      setRequests((prev) => [createdRequest as StudentRequest, ...prev]);
       setModalVisible(false);
       setReqReason('');
-      Alert.alert('Request Submitted! 📋', 'Your application has been forwarded to the faculty advisor / Dean office for review.');
-    } catch (_) {
-      Alert.alert('Error', 'Failed to submit request. Please try again.');
+      setStartDate('');
+      setEndDate('');
+      setClientRequestId(`leave-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      Alert.alert('Request submitted', 'The server confirmed your request.');
+    } catch (error: any) {
+      Alert.alert('Request unavailable', error?.response?.data?.message || error?.message || 'The request was not submitted.');
     } finally {
       setSubmitting(false);
     }
@@ -108,8 +116,8 @@ export default function RequestsScreen() {
 
           <View style={styles.headerTitles}>
             <ThemedText style={styles.headerTitle}>Student Requests</ThemedText>
-            <ThemedText style={styles.headerSubtitle}>
-              Leaves & Official Document Applications
+              <ThemedText style={styles.headerSubtitle}>
+              Leave requests and review status
             </ThemedText>
           </View>
 
@@ -168,7 +176,9 @@ export default function RequestsScreen() {
                 colors={[Navy.primary]}
               />
             }>
-            {filteredRequests.length === 0 ? (
+            {requestsError ? (
+              <EmptyState icon="alert-circle-outline" title="Requests Unavailable" message={requestsError} />
+            ) : filteredRequests.length === 0 ? (
               <EmptyState
                 icon="document-text-outline"
                 title="No Requests Found"
@@ -217,20 +227,13 @@ export default function RequestsScreen() {
                   </View>
 
                   <View style={styles.reasonBox}>
-                    <ThemedText style={styles.reasonLabel}>Reason / Remarks:</ThemedText>
+                    <ThemedText style={styles.reasonLabel}>Leave dates:</ThemedText>
+                    <ThemedText style={styles.reasonText}>{req.startDate ? `${new Date(req.startDate).toLocaleDateString()} – ${new Date(req.endDate || req.startDate).toLocaleDateString()}` : 'Dates unavailable'}</ThemedText>
+                    <ThemedText style={styles.reasonLabel}>Reason:</ThemedText>
                     <ThemedText style={styles.reasonText}>{req.reason}</ThemedText>
+                    {req.reviewerRemarks?.map((review, index) => review.remarks ? <ThemedText key={`${req.id}-review-${index}`} style={styles.reasonText}>{review.reviewer}: {review.remarks}</ThemedText> : null)}
                   </View>
 
-                  <View style={styles.timelineHintRow}>
-                    <Ionicons name="git-commit-outline" size={13} color="#94A3B8" />
-                    <ThemedText style={styles.timelineHintText}>
-                      {req.status === 'Approved'
-                        ? 'Approved by Faculty Advisor & Dean'
-                        : req.status === 'Under Review'
-                        ? 'Under verification at HOD desk'
-                        : 'Awaiting initial review'}
-                    </ThemedText>
-                  </View>
                 </View>
               ))
             )}
@@ -261,11 +264,9 @@ export default function RequestsScreen() {
                 <ThemedText style={styles.inputLabel}>Request Category</ThemedText>
                 <View style={styles.typeOptionsWrap}>
                   {[
-                    'Medical Leave Application',
-                    'On-Duty (OD) Leave',
-                    'Bonafide Certificate',
-                    'Transcript Request',
-                    'Hostel Outpass Request',
+                    'Medical Leave',
+                    'Personal Leave',
+                    'On-Duty Leave',
                   ].map((t) => {
                     const isSelected = reqType === t;
                     return (
@@ -291,6 +292,11 @@ export default function RequestsScreen() {
                     );
                   })}
                 </View>
+
+                <ThemedText style={styles.inputLabel}>Start date (YYYY-MM-DD) *</ThemedText>
+                <TextInput value={startDate} onChangeText={setStartDate} placeholder="2026-10-24" placeholderTextColor="#94A3B8" style={styles.requestDateInput} />
+                <ThemedText style={styles.inputLabel}>End date (YYYY-MM-DD) *</ThemedText>
+                <TextInput value={endDate} onChangeText={setEndDate} placeholder="2026-10-24" placeholderTextColor="#94A3B8" style={styles.requestDateInput} />
 
                 {/* Reason / Remarks */}
                 <ThemedText style={styles.inputLabel}>Detailed Justification / Reason *</ThemedText>
@@ -530,6 +536,16 @@ const styles = StyleSheet.create({
     color: Navy.primary,
     marginBottom: 8,
     marginTop: 10,
+  },
+  requestDateInput: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: Navy.primary,
+    fontSize: 13,
   },
   typeOptionsWrap: {
     gap: 6,

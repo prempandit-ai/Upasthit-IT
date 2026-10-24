@@ -8,26 +8,25 @@ export interface AttendanceSubjectItem {
   id?: string;
   name: string;
   code?: string;
-  faculty?: string;
+  faculty?: string | null;
   present: number;
   conducted: number;
-  percentage?: number;
-  status?: 'Good' | 'Warning' | 'Critical';
+  percentage?: number | null;
+  status?: 'Good' | 'Warning' | 'Critical' | null;
 }
 
 interface AttendanceCardProps {
   item: AttendanceSubjectItem;
-  minRequired?: number;
+  minRequired?: number | null;
   onPress?: () => void;
 }
 
 /**
- * AttendanceCard — renders subject attendance with progress bar,
- * 75% threshold marker, status badges, and safe miss / catch up calculations.
+ * AttendanceCard — renders recorded subject attendance and an optional policy marker.
  */
 export default function AttendanceCard({
   item,
-  minRequired = 75,
+  minRequired = null,
   onPress,
 }: AttendanceCardProps) {
   const conducted = item.conducted || 0;
@@ -37,31 +36,23 @@ export default function AttendanceCard({
       ? item.percentage
       : conducted > 0
       ? Math.round((present / conducted) * 100)
-      : 0;
+      : null;
 
-  const isLow = pct < minRequired;
-  const isCritical = pct < 60;
-
-  const barColor = isCritical
-    ? '#EF4444'
-    : isLow
-    ? '#F59E0B'
-    : '#10B981';
+  const isLow = pct !== null && minRequired !== null && pct < minRequired;
+  const barColor = pct === null ? '#94A3B8' : '#0284C7';
 
   // Smart Attendance Insight calculation
   let insightText = '';
   let isDangerInsight = false;
 
-  if (conducted > 0) {
+  if (conducted > 0 && pct !== null && minRequired !== null) {
     if (pct < minRequired) {
-      // Classes to attend consecutively to reach 75%
-      // (present + x) / (conducted + x) >= 0.75 => x >= (0.75*conducted - present)/0.25
+      // Estimate additional sessions using only a policy explicitly supplied by the caller.
       const needed = Math.ceil((minRequired / 100 * conducted - present) / (1 - minRequired / 100));
       insightText = needed > 0 ? `Attend next ${needed} classes to reach ${minRequired}%` : 'On track';
       isDangerInsight = true;
     } else {
-      // Classes student can afford to miss without dropping below 75%
-      // present / (conducted + y) >= 0.75 => conducted + y <= present / 0.75 => y <= present/0.75 - conducted
+      // Estimate missed sessions using only a policy explicitly supplied by the caller.
       const canMiss = Math.floor(present / (minRequired / 100) - conducted);
       if (canMiss > 0) {
         insightText = `Can miss ${canMiss} class${canMiss > 1 ? 'es' : ''} safely`;
@@ -98,23 +89,23 @@ export default function AttendanceCard({
         </View>
 
         <View style={styles.percentageBadge}>
-          <ThemedText style={[styles.percentageText, { color: barColor }]}>
-            {pct}%
+          <ThemedText style={[styles.percentageText, { color: pct === null ? '#64748B' : barColor }]}>
+            {pct === null ? '—' : `${pct}%`}
           </ThemedText>
         </View>
       </View>
 
-      {/* Progress Bar with 75% marker */}
+      {/* Progress Bar with optional policy marker */}
       <View style={styles.progressContainer}>
         <View style={styles.track}>
           <View
             style={[
               styles.fill,
-              { width: `${Math.min(100, Math.max(0, pct))}%`, backgroundColor: barColor },
+              { width: `${Math.min(100, Math.max(0, pct ?? 0))}%`, backgroundColor: barColor },
             ]}
           />
-          {/* 75% Benchmark tick mark */}
-          <View style={[styles.thresholdMarker, { left: `${minRequired}%` }]} />
+          {/* The benchmark is omitted unless a policy is provided. */}
+          {minRequired !== null ? <View style={[styles.thresholdMarker, { left: `${minRequired}%` }]} /> : null}
         </View>
       </View>
 
@@ -122,7 +113,7 @@ export default function AttendanceCard({
       <View style={styles.statsRow}>
         <ThemedText style={styles.ratioText}>
           <ThemedText style={styles.ratioHighlight}>{present}</ThemedText>
-          /{conducted} attended
+            /{conducted} recorded
         </ThemedText>
 
         {insightText ? (

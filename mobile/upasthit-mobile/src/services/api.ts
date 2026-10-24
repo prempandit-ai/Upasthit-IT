@@ -1,23 +1,65 @@
 import axios, { AxiosError } from 'axios';
+import * as Device from 'expo-device';
+import { DeviceEventEmitter } from 'react-native';
 
 import { clearAuthStorage, getToken, isTokenExpired } from '@/utils/storage';
 
 const rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || '').trim();
-const API_URL = rawApiUrl.replace(/\s+/g, '').replace(/\/+$/, '');
 
-if (!API_URL) {
+function normalizeApiBaseUrl(value: string): string {
+  if (!value) {
+    throw new Error(
+      'EXPO_PUBLIC_API_URL is not configured. ' +
+        'Set it to the backend origin or API base URL in your .env file.'
+    );
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(value.replace(/\s+/g, ''));
+  } catch {
+    throw new Error('EXPO_PUBLIC_API_URL must be a valid absolute HTTP or HTTPS URL.');
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('EXPO_PUBLIC_API_URL must use the http:// or https:// protocol.');
+  }
+
+  // Treat the environment value as either an origin or an API base. This keeps
+  // callers such as /auth/me on one consistent /api prefix.
+  const basePath = parsedUrl.pathname
+    .split('/')
+    .filter(Boolean)
+    .filter((segment) => segment.toLowerCase() !== 'api');
+  parsedUrl.pathname = `/${[...basePath, 'api'].join('/')}`;
+  parsedUrl.search = '';
+  parsedUrl.hash = '';
+
+  return parsedUrl.toString().replace(/\/$/, '');
+}
+
+const API_URL = normalizeApiBaseUrl(rawApiUrl);
+const apiHostname = new URL(API_URL).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+const isLoopbackHost = ['localhost', '127.0.0.1', '::1'].includes(apiHostname);
+if (__DEV__ && Device.isDevice && isLoopbackHost) {
   throw new Error(
-    'EXPO_PUBLIC_API_URL is not configured. ' +
-      'Add it to your .env file (e.g. EXPO_PUBLIC_API_URL=http://10.88.180.140:5000).'
+    'A physical device cannot reach the laptop backend through localhost. ' +
+      'Set EXPO_PUBLIC_API_URL to the laptop\'s reachable LAN IP.'
+  );
+}
+if (__DEV__ && isLoopbackHost) {
+  console.warn(
+    '[API] EXPO_PUBLIC_API_URL uses a loopback host. A physical device needs the laptop\'s reachable LAN IP.'
   );
 }
 
 if (__DEV__) {
-  console.log('[API] Base URL:', `${API_URL}/api`);
+  // Keep the configured host out of logs while still confirming API path setup.
+  console.log('[API] Base URL configured; API path:', new URL(API_URL).pathname);
 }
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -42,6 +84,10 @@ export function classifyApiError(error: unknown): string {
 
   // No response → the request never reached the server (network/firewall issue)
   if (!axiosError.response) {
+    if (error instanceof Error && !(error instanceof AxiosError)) return error.message;
+    if (axiosError.code === 'ECONNABORTED' || axiosError.code === 'ETIMEDOUT') {
+      return 'The server request timed out. Check the connection and retry.';
+    }
     return 'Cannot connect to server. Check your network connection and make sure the backend is running.';
   }
 
@@ -70,8 +116,14 @@ export function classifyApiError(error: unknown): string {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if ((error as AxiosError).response?.status === 401) {
+    const axiosError = error as AxiosError<{ message?: string }>;
+    const status = axiosError.response?.status;
+    const authRevoked = status === 403 && /account is deactivated|account is not approved/i.test(
+      axiosError.response?.data?.message || ''
+    );
+    if (status === 401 || authRevoked) {
       await clearAuthStorage();
+      DeviceEventEmitter.emit('auth:session-invalid');
     }
 
     return Promise.reject(error);

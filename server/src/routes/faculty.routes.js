@@ -1,5 +1,6 @@
 const express = require("express");
 const facultyController = require("../controllers/faculty.controller");
+const portalManagementController = require("../controllers/studentPortalManagement.controller");
 const authenticate = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const requireApproved = require("../middleware/approval.middleware");
@@ -17,6 +18,17 @@ router.get("/today-classes", authorize("FACULTY"), facultyController.getMyTodayC
 router.get("/schedule/today", authorize("FACULTY"), facultyController.getMyTodaySchedule);
 router.get("/notifications", authorize("FACULTY"), facultyController.getMyNotifications);
 router.get("/attendance/summary", authorize("FACULTY"), facultyController.getMyAttendanceSummary);
+router.get("/timetable", authorize("FACULTY"), portalManagementController.getFacultyTimetable);
+router.post("/timetable", authorize("FACULTY"), portalManagementController.createTimetableEntry);
+router.delete("/timetable/:id", authorize("FACULTY"), portalManagementController.deleteTimetableEntry);
+router.get("/assignments", authorize("FACULTY"), portalManagementController.listFacultyAssignments);
+router.post("/assignments", authorize("FACULTY"), portalManagementController.createFacultyAssignment);
+router.patch("/assignments/:id", authorize("FACULTY"), portalManagementController.updateFacultyAssignment);
+router.get("/assignments/:id/submissions", authorize("FACULTY"), portalManagementController.getAssignmentSubmissions);
+router.patch("/assignments/:id/submissions/:submissionId/review", authorize("FACULTY"), portalManagementController.reviewAssignmentSubmission);
+router.get("/study-plans", authorize("FACULTY"), portalManagementController.listFacultyStudyPlans);
+router.post("/study-plans", authorize("FACULTY"), portalManagementController.createFacultyStudyPlan);
+router.patch("/study-plans/:id/publish", authorize("FACULTY"), portalManagementController.publishStudyPlan);
 
 // List all faculty — Admin, HOD, Coordinator
 router.get("/", authorize("ADMIN", "HOD", "COORDINATOR"), facultyController.listFaculty);

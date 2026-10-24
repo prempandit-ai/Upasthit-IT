@@ -18,6 +18,7 @@ import {
 } from "../../services/authService";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import RoleBadge from "../../components/RoleBadge";
+import AdminStudentServices from "./AdminStudentServices";
 
 // ── Status pill ───────────────────────────────────────────────────────────────
 const StatusPill = ({ status }) => {
@@ -224,7 +225,7 @@ const UsersTable = ({ users, onApprove, onReject, onDeactivate, actionLoading })
 };
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
-const TABS = ["User Management", "Create HOD", "Create Faculty"];
+const TABS = ["User Management", "Create HOD", "Create Faculty", "Student Services"];
 
 // ── Main component ────────────────────────────────────────────────────────────
 const AdminDashboard = () => {
@@ -441,6 +442,8 @@ const AdminDashboard = () => {
           />
         </div>
       )}
+
+      {activeTab === "Student Services" && <AdminStudentServices />}
     </div>
   );
 };

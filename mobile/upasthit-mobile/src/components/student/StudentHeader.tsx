@@ -12,7 +12,7 @@ interface StudentHeaderProps {
 }
 
 export default function StudentHeader({
-  unreadCount = 2,
+  unreadCount,
   onNotificationPress,
 }: StudentHeaderProps) {
   const { user } = useAuth();
@@ -35,10 +35,10 @@ export default function StudentHeader({
         <ThemedText style={styles.name}>{user?.name || 'Student'}</ThemedText>
         <View style={styles.metaRow}>
           <ThemedText style={styles.metaBadge}>
-            {user?.profile?.departmentName || user?.profile?.departmentCode || 'B.Tech IT'}
+            {user?.profile?.departmentName || user?.profile?.departmentCode || 'Academic details unavailable'}
           </ThemedText>
           <ThemedText style={styles.metaText}>
-            {user?.profile?.year ? `${user.profile.year} ` : ''}Semester {user?.profile?.semester ?? 6}{user?.profile?.division ? ` • Div ${user.profile.division}` : ''}
+            {user?.profile?.year ? `${user.profile.year} ` : ''}Semester {user?.profile?.semester ?? 'Not available'}{user?.profile?.division ? ` • Div ${user.profile.division}` : ''}
           </ThemedText>
         </View>
       </View>
@@ -49,7 +49,7 @@ export default function StudentHeader({
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           onPress={handleNotification}>
           <Ionicons name="notifications-outline" size={22} color={Navy.primary} />
-          {unreadCount > 0 && (
+          {unreadCount !== undefined && unreadCount > 0 && (
             <View style={styles.badge}>
               <ThemedText style={styles.badgeText}>
                 {unreadCount > 9 ? '9+' : unreadCount}

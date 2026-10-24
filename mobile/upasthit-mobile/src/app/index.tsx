@@ -1,5 +1,5 @@
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,7 +8,7 @@ import { Navy } from '@/constants/theme';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function IndexScreen() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, bootstrapError, retryBootstrap } = useAuth();
 
   if (loading) {
     return (
@@ -18,6 +18,22 @@ export default function IndexScreen() {
           <ThemedText type="small" themeColor="textSecondary" style={styles.label}>
             Loading UPASTHIT...
           </ThemedText>
+        </SafeAreaView>
+      </ThemedView>
+    );
+  }
+
+  if (bootstrapError) {
+    return (
+      <ThemedView style={styles.container}>
+        <SafeAreaView style={styles.center}>
+          <ThemedText type="subtitle">Unable to validate your session</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
+            {bootstrapError}
+          </ThemedText>
+          <Pressable onPress={retryBootstrap} style={styles.retryButton} accessibilityRole="button">
+            <ThemedText type="smallBold" style={styles.retryLabel}>Retry</ThemedText>
+          </Pressable>
         </SafeAreaView>
       </ThemedView>
     );
@@ -42,5 +58,21 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: 8,
+  },
+  message: {
+    marginHorizontal: 28,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 8,
+    minWidth: 132,
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    backgroundColor: Navy.primary,
+  },
+  retryLabel: {
+    color: '#FFFFFF',
   },
 });

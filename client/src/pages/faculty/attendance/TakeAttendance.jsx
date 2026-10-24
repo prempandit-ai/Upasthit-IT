@@ -9,6 +9,7 @@ import {
 import PageHeader from '../../../components/faculty/shared/PageHeader';
 import StatusBadge from '../../../components/faculty/shared/StatusBadge';
 import { useToast } from '../../../context/ToastContext';
+import { mergePolledAttendanceRoster } from '../../../utils/attendanceRoster';
 import {
   getFacultyAttendanceAssignments,
   getEligibleAttendanceStudents,
@@ -88,7 +89,7 @@ const TakeAttendance = () => {
   const [sessionType, setSessionType] = useState('Lecture');
   const [section, setSection] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState('09:00 AM - 10:00 AM');
+  const [time, setTime] = useState('');
 
   const [session, setSession] = useState(null);
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(0);
@@ -98,6 +99,11 @@ const TakeAttendance = () => {
   const [studentsLoading, setStudentsLoading] = useState(false);
   const [studentsError, setStudentsError] = useState('');
   const rosterRequestId = useRef(0);
+  const sessionRosterRequestId = useRef(0);
+  const sessionRosterInFlight = useRef(new Map());
+  const dirtyStudentStatuses = useRef(new Map());
+  const loadedSessionId = useRef(null);
+  const timeLeftRef = useRef(0);
   const [searchStudent, setSearchStudent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [backendStats, setBackendStats] = useState({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
@@ -203,12 +209,15 @@ const TakeAttendance = () => {
     if (!nextSession) {
       setSession(null);
       setTimeLeftSeconds(0);
+      timeLeftRef.current = 0;
       setBackendStats({ total: 0, marked: 0, missing: 0, present: 0, absent: 0 });
       storeAttendanceSessionId(null);
       return;
     }
     setSession(nextSession);
-    setTimeLeftSeconds(remainingFromSession(nextSession));
+    const remaining = remainingFromSession(nextSession);
+    setTimeLeftSeconds(remaining);
+    timeLeftRef.current = remaining;
     if (nextSession.stats) setBackendStats(nextSession.stats);
     if (nextSession.status === 'ACTIVE') storeAttendanceSessionId(nextSession.id);
     else storeAttendanceSessionId(null);
@@ -226,6 +235,10 @@ const TakeAttendance = () => {
 
   const loadRoster = useCallback(async (assignment, division, selectedLabBatch, type) => {
     const requestId = ++rosterRequestId.current;
+    sessionRosterRequestId.current += 1;
+    sessionRosterInFlight.current.clear();
+    dirtyStudentStatuses.current.clear();
+    loadedSessionId.current = null;
     if (!assignment?.id) {
       setStudents([]);
       setStudentsLoading(false);
@@ -290,9 +303,23 @@ const TakeAttendance = () => {
     }
   }, []);
 
-  const loadSessionStudents = useCallback(async (sessionId) => {
-    setStudentsLoading(true);
-    setStudentsError('');
+  const loadSessionStudents = useCallback(async (sessionId, { silent = false, preserveVisibleRoster = false } = {}) => {
+    if (silent && sessionRosterInFlight.current.has(sessionId)) return;
+
+    const isNewSessionRoster = loadedSessionId.current !== sessionId;
+    if (isNewSessionRoster) {
+      dirtyStudentStatuses.current.clear();
+      loadedSessionId.current = sessionId;
+      if (!silent && !preserveVisibleRoster) setStudents([]);
+    }
+
+    const requestId = ++sessionRosterRequestId.current;
+    rosterRequestId.current += 1;
+    sessionRosterInFlight.current.set(sessionId, requestId);
+    if (!silent && !preserveVisibleRoster) {
+      setStudentsLoading(true);
+      setStudentsError('');
+    }
     try {
       const { data } = await getAttendanceSessionStudents(sessionId);
       const roster = (data.students || [])
@@ -302,26 +329,42 @@ const TakeAttendance = () => {
           eligible: student.eligible !== false,
         }))
         .sort((a, b) => (Number(a.rollNo) || 0) - (Number(b.rollNo) || 0));
-      setStudents(roster);
+      if (requestId !== sessionRosterRequestId.current) return;
+      if (silent || preserveVisibleRoster || !isNewSessionRoster) {
+        setStudents((current) => requestId === sessionRosterRequestId.current
+          ? mergePolledAttendanceRoster(current, roster, dirtyStudentStatuses.current)
+          : current);
+      } else {
+        setStudents(roster);
+      }
       if (data.session) {
-        applySession(data.session);
-        if (data.session.assignment) {
+        if (data.session.stats) setBackendStats(data.session.stats);
+        if (!silent || data.session.status !== 'ACTIVE') {
+          applySession(data.session);
+        }
+        if (!silent && data.session.assignment) {
           setBatch(data.session.assignment.batchLabel || '');
           setSubject(data.session.assignment.subjectName || '');
+          const currentDivision = data.session.division || data.session.assignment?.division || 'A';
+          setSection(formatDivisionOption(currentDivision));
+          setLabBatch(data.session.labBatch || '');
+          const currentType = data.session.attendanceType || (data.session.labBatch ? 'Lab Session' : 'Class Lecture');
+          setAttendanceType(/lab/i.test(currentType) ? 'Lab Session' : currentType === 'Event' ? 'Event' : 'Class Lecture');
+          setSessionType(data.session.sessionType || (/lab/i.test(currentType) ? 'Lab Session' : 'Lecture'));
         }
-        const currentDivision = data.session.division || data.session.assignment?.division || 'A';
-        setSection(formatDivisionOption(currentDivision));
-        setLabBatch(data.session.labBatch || '');
-        const currentType = data.session.attendanceType || (data.session.labBatch ? 'Lab Session' : 'Class Lecture');
-        setAttendanceType(/lab/i.test(currentType) ? 'Lab Session' : currentType === 'Event' ? 'Event' : 'Class Lecture');
-        setSessionType(data.session.sessionType || (/lab/i.test(currentType) ? 'Lab Session' : 'Lecture'));
       }
-      if (roster.length === 0) setStudentsError(EMPTY_ROSTER_MESSAGE);
+      if (!silent && roster.length === 0) setStudentsError(EMPTY_ROSTER_MESSAGE);
     } catch (error) {
-      setStudents([]);
-      setStudentsError(getAttendanceErrorMessage(error, 'Unable to load students for this session'));
+      if (requestId !== sessionRosterRequestId.current) return;
+      if (!silent) {
+        if (isNewSessionRoster && !preserveVisibleRoster) setStudents([]);
+        setStudentsError(getAttendanceErrorMessage(error, 'Unable to load students for this session'));
+      }
     } finally {
-      setStudentsLoading(false);
+      if (sessionRosterInFlight.current.get(sessionId) === requestId) {
+        sessionRosterInFlight.current.delete(sessionId);
+      }
+      if (!silent && !preserveVisibleRoster && requestId === sessionRosterRequestId.current) setStudentsLoading(false);
     }
   }, [applySession]);
 
@@ -411,10 +454,28 @@ const TakeAttendance = () => {
   useEffect(() => {
     if (!sessionActive) return undefined;
     const timer = setInterval(() => {
-      setTimeLeftSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      setTimeLeftSeconds((prev) => {
+        const next = prev > 0 ? prev - 1 : 0;
+        timeLeftRef.current = next;
+        return next;
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, [sessionActive]);
+
+  useEffect(() => {
+    if (!session?.id || sessionStatus !== 'ACTIVE' || timeLeftRef.current <= 0) return undefined;
+    let refreshRoster;
+    const pollRoster = () => {
+      if (timeLeftRef.current <= 0) {
+        clearInterval(refreshRoster);
+        return;
+      }
+      loadSessionStudents(session.id, { silent: true });
+    };
+    refreshRoster = setInterval(pollRoster, 5000);
+    return () => clearInterval(refreshRoster);
+  }, [session?.id, session?.expiresAt, sessionStatus, loadSessionStudents]);
 
   useEffect(() => {
     if (!session?.id || sessionStatus !== 'ACTIVE' || timeLeftSeconds > 0) return undefined;
@@ -472,6 +533,10 @@ const TakeAttendance = () => {
   const clearSelectionSession = () => {
     if (selectionLocked) return;
     rosterRequestId.current += 1;
+    sessionRosterRequestId.current += 1;
+    sessionRosterInFlight.current.clear();
+    dirtyStudentStatuses.current.clear();
+    loadedSessionId.current = null;
     applySession(null);
     setStudents([]);
     setStudentsLoading(false);
@@ -543,14 +608,32 @@ const TakeAttendance = () => {
       const nextSession = started.data?.session;
       if (!nextSession) throw new Error('Attendance window was not started');
       applySession(nextSession);
-      await loadSessionStudents(nextSession.id);
+      await loadSessionStudents(nextSession.id, { preserveVisibleRoster: true });
       showToast('Attendance session started!', 'success');
     } catch (error) {
       if (error.response?.data?.session) {
         applySession(error.response.data.session);
-        await loadSessionStudents(error.response.data.session.id);
+        await loadSessionStudents(error.response.data.session.id, { preserveVisibleRoster: true });
       }
       showToast(getAttendanceErrorMessage(error, 'Unable to start the attendance window'), 'error');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleIssueStudentCode = async () => {
+    if (!session?.id || !sessionActive) return;
+    setStarting(true);
+    try {
+      const { data } = await startAttendanceSessionById(session.id);
+      if (!data?.session) throw new Error('The active attendance session was not returned');
+      setSession((current) => current?.id === session.id
+        ? { ...current, joinCode: data.session.joinCode || current.joinCode }
+        : current);
+      if (data.session.stats) setBackendStats(data.session.stats);
+      showToast('Student check-in code issued for this active window.', 'success');
+    } catch (error) {
+      showToast(getAttendanceErrorMessage(error, 'Unable to issue a student check-in code'), 'error');
     } finally {
       setStarting(false);
     }
@@ -561,12 +644,16 @@ const TakeAttendance = () => {
       showToast('Start the attendance window before marking students.', 'warning');
       return;
     }
+    students.forEach((student) => {
+      if (student.eligible !== false) dirtyStudentStatuses.current.set(student.id, status);
+    });
     setStudents((prev) => prev.map((s) => (s.eligible === false ? s : { ...s, status })));
     showToast(`Marked all students as ${status}`, 'info');
   };
 
   const handleStatusChange = (id, newStatus) => {
     if (!canMark) return;
+    dirtyStudentStatuses.current.set(id, newStatus);
     setStudents((prev) => prev.map((s) =>
       s.id === id && s.eligible !== false ? { ...s, status: newStatus } : s
     ));
@@ -589,7 +676,9 @@ const TakeAttendance = () => {
     try {
       const { data } = await submitAttendance(session.id, { records });
       if (data.session) applySession(data.session);
-      await loadSessionStudents(session.id);
+      dirtyStudentStatuses.current.clear();
+      sessionRosterRequestId.current += 1;
+      await loadSessionStudents(session.id, { silent: true });
       showToast('Attendance submitted successfully!', 'success');
     } catch (error) {
       showToast(getAttendanceErrorMessage(error, 'Attendance was not saved. Please try again.'), 'error');
@@ -615,6 +704,11 @@ const TakeAttendance = () => {
 
   const handleViewSession = async (row) => {
     try {
+      rosterRequestId.current += 1;
+      sessionRosterRequestId.current += 1;
+      sessionRosterInFlight.current.clear();
+      dirtyStudentStatuses.current.clear();
+      loadedSessionId.current = null;
       applySession(null);
       const { data } = await getAttendanceSession(row.id);
       applySession(data.session);
@@ -821,6 +915,7 @@ const TakeAttendance = () => {
             <input
               type="text"
               value={time}
+              placeholder="Optional session time"
               onChange={(e) => setTime(e.target.value)}
               disabled={selectionLocked}
               className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
@@ -904,8 +999,34 @@ const TakeAttendance = () => {
         {/* Info Banner */}
         <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-2.5 text-xs text-blue-700 flex items-center gap-2">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white font-bold">i</span>
-          <span>Students can report missing attendance within this 5-minute window via their mobile portal.</span>
+          <span>
+            {sessionActive && session?.joinCode
+              ? 'Students can check in with the six-digit code during this five-minute window.'
+              : sessionActive
+              ? 'This active window has no check-in code and cannot accept student mobile check-ins.'
+              : 'Start the five-minute window to issue a student mobile check-in code.'}
+          </span>
         </div>
+        {sessionActive && session?.joinCode ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Student check-in code</span>
+            <span className="font-mono text-2xl font-extrabold tracking-[0.3em] text-emerald-900">{session.joinCode}</span>
+            <span className="text-xs text-emerald-800">Share with this class during the active window only.</span>
+          </div>
+        ) : null}
+        {sessionActive && !session?.joinCode ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <span className="text-xs text-amber-800">This active window has no student check-in code.</span>
+            <button
+              type="button"
+              disabled={starting}
+              onClick={handleIssueStudentCode}
+              className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {starting ? 'Issuing...' : 'Issue code for this window'}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {/* ── 3. Students List Card ── */}
@@ -957,7 +1078,7 @@ const TakeAttendance = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {studentsLoading ? (
+              {studentsLoading && filteredStudents.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-6 text-center text-slate-500">
                     Loading students...

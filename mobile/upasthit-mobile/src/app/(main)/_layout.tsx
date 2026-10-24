@@ -23,7 +23,7 @@ const TAB_ICON: Record<string, { active: IoniconsName; inactive: IoniconsName }>
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 export default function MainLayout() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user, bootstrapError } = useAuth();
 
   if (loading) {
     return (
@@ -38,7 +38,11 @@ export default function MainLayout() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (bootstrapError) {
+    return <Redirect href="/" />;
+  }
+
+  if (!isAuthenticated || user?.role !== 'STUDENT' || user.status !== 'APPROVED' || user.isActive !== true) {
     return <Redirect href="/login" />;
   }
 

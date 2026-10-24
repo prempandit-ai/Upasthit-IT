@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  TextInput,
+  Linking,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,11 +23,16 @@ import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
 import { useAuth } from '@/hooks/use-auth';
 import {
   Assignment,
+  ActiveAttendanceSession,
   AttendanceSummary,
+  checkInToAttendanceSession,
+  getActiveStudentAttendanceSessions,
   getStudentAssignments,
   getStudentAttendance,
   getStudentProjects,
+  getStudentSubjects,
   getStudentStudyPlans,
+  submitStudentAssignment,
   Project,
   StudyPlan,
 } from '@/services/studentService';
@@ -40,42 +49,122 @@ export default function AcademicsScreen() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [studyPlans, setStudyPlans] = useState<StudyPlan[]>([]);
+  const [subjectEnrollments, setSubjectEnrollments] = useState<any[]>([]);
+  const [subjectsError, setSubjectsError] = useState('');
+  const [attendanceError, setAttendanceError] = useState('');
+  const [assignmentsError, setAssignmentsError] = useState('');
+  const [projectsError, setProjectsError] = useState('');
+  const [studyPlansError, setStudyPlansError] = useState('');
+  const [activeSessions, setActiveSessions] = useState<ActiveAttendanceSession[]>([]);
+  const [activeSessionsError, setActiveSessionsError] = useState('');
+  const [joinCodes, setJoinCodes] = useState<Record<number, string>>({});
+  const [checkingInId, setCheckingInId] = useState<number | null>(null);
+  const [checkInError, setCheckInError] = useState('');
+  const [clockNow, setClockNow] = useState(Date.now());
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null);
+  const [submissionText, setSubmissionText] = useState('');
+  const [submittingAssignmentId, setSubmittingAssignmentId] = useState<string | null>(null);
 
   const fetchData = async () => {
-    try {
-      const [attRes, assignRes, projRes, planRes] = await Promise.allSettled([
-        getStudentAttendance(),
-        getStudentAssignments(),
-        getStudentProjects(),
-        getStudentStudyPlans(),
-      ]);
-
-      if (attRes.status === 'fulfilled') {
-        setAttendance(attRes.value.data);
-      }
-      if (assignRes.status === 'fulfilled') {
-        setAssignments(assignRes.value.data?.assignments ?? []);
-      }
-      if (projRes.status === 'fulfilled') {
-        setProjects(projRes.value.data?.projects ?? []);
-      }
-      if (planRes.status === 'fulfilled') {
-        setStudyPlans(planRes.value.data?.studyPlans ?? []);
-      }
-    } catch (_) {
-      // safe fallback in service layer prevents crashes
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    const [attRes, subjectRes, assignRes, projRes, planRes] = await Promise.allSettled([
+      getStudentAttendance(), getStudentSubjects(), getStudentAssignments(), getStudentProjects(), getStudentStudyPlans(),
+    ]);
+    if (attRes.status === 'fulfilled') {
+      setAttendance(attRes.value.data);
+      setAttendanceError('');
+    } else {
+      setAttendance(null);
+      setAttendanceError('Attendance is unavailable right now. Refresh to try again.');
     }
+    if (subjectRes.status === 'fulfilled') {
+      setSubjectEnrollments(subjectRes.value.data?.enrollments ?? []);
+      setSubjectsError('');
+    } else {
+      setSubjectEnrollments([]);
+      setSubjectsError('Enrolled subjects are unavailable right now. Refresh to try again.');
+    }
+    if (assignRes.status === 'fulfilled') {
+      setAssignments(assignRes.value.data?.assignments ?? []);
+      setAssignmentsError('');
+    } else {
+      setAssignments([]);
+      setAssignmentsError('Assignments are unavailable because no student assignments service is connected.');
+    }
+    if (projRes.status === 'fulfilled') {
+      setProjects(projRes.value.data?.projects ?? []);
+      setProjectsError('');
+    } else {
+      setProjects([]);
+      setProjectsError('Projects are unavailable because no student projects service is connected.');
+    }
+    if (planRes.status === 'fulfilled') {
+      setStudyPlans(planRes.value.data?.studyPlans ?? []);
+      setStudyPlansError('');
+    } else {
+      setStudyPlans([]);
+      setStudyPlansError('Study plans are unavailable because no student study plans service is connected.');
+    }
+    setLoading(false);
+    setRefreshing(false);
   };
 
   useEffect(() => {
     fetchData();
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    let focused = true;
+    const loadActiveSessions = async () => {
+      try {
+        const { data } = await getActiveStudentAttendanceSessions();
+        if (focused) {
+          setActiveSessions(data.sessions);
+          setActiveSessionsError('');
+        }
+      } catch {
+        if (focused) {
+          setActiveSessions([]);
+          setActiveSessionsError('Unable to load eligible active attendance sessions.');
+        }
+      }
+    };
+    loadActiveSessions();
+    const poll = setInterval(loadActiveSessions, 5000);
+    return () => {
+      focused = false;
+      clearInterval(poll);
+    };
+  }, []));
+
+  useFocusEffect(useCallback(() => {
+    let focused = true;
+    const refreshAttendance = async () => {
+      try {
+        const { data } = await getStudentAttendance();
+        if (focused) {
+          setAttendance(data);
+          setAttendanceError('');
+        }
+      } catch {
+        if (focused) {
+          setAttendance(null);
+          setAttendanceError('Attendance is unavailable right now. Refresh to try again.');
+        }
+      }
+    };
+    const poll = setInterval(refreshAttendance, 15000);
+    return () => {
+      focused = false;
+      clearInterval(poll);
+    };
+  }, []));
+
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const onRefresh = () => {
@@ -83,10 +172,53 @@ export default function AcademicsScreen() {
     fetchData();
   };
 
-  const overallPct = attendance?.overallPercentage ?? 82;
-  const isGood = overallPct >= 75;
-  const ringColor = isGood ? '#10B981' : overallPct >= 65 ? '#F59E0B' : '#EF4444';
-  const ringBg = isGood ? '#ECFDF5' : overallPct >= 65 ? '#FFFBEB' : '#FEF2F2';
+  const overallPct = attendance?.overallPercentage;
+  const ringColor = overallPct === null || overallPct === undefined ? '#94A3B8' : '#0284C7';
+  const ringBg = overallPct === null || overallPct === undefined ? '#F8FAFC' : '#F0F9FF';
+
+  const handleCheckIn = async (session: ActiveAttendanceSession) => {
+    setCheckingInId(session.id);
+    setCheckInError('');
+    try {
+      const result = await checkInToAttendanceSession(session.id, joinCodes[session.id] || '');
+      await fetchData();
+      const activeRes = await getActiveStudentAttendanceSessions();
+      setActiveSessions(activeRes.data.sessions);
+      Alert.alert('Attendance confirmed', result.data.alreadyCheckedIn
+        ? 'Your attendance was already recorded as present.'
+        : 'The server recorded your attendance as present.');
+      setJoinCodes((current) => ({ ...current, [session.id]: '' }));
+    } catch (error: any) {
+      setCheckInError(error?.response?.data?.message || error?.message || 'Attendance could not be confirmed.');
+    } finally {
+      setCheckingInId(null);
+    }
+  };
+
+  const handleAssignmentSubmit = async (assignment: Assignment) => {
+    if (!submissionText.trim()) {
+      Alert.alert('Response required', 'Enter your response before submitting.');
+      return;
+    }
+    setSubmittingAssignmentId(assignment.id);
+    try {
+      const response = await submitStudentAssignment(assignment.id, { responseText: submissionText.trim() });
+      if (response.data?.success !== true || !response.data?.submission?.id) throw new Error('The server did not confirm the submission.');
+      setSubmissionText('');
+      await fetchData();
+      Alert.alert('Submission received', 'The server saved your assignment response.');
+    } catch (error: any) {
+      Alert.alert('Submission unavailable', error?.response?.data?.message || error?.message || 'Your response was not submitted.');
+    } finally {
+      setSubmittingAssignmentId(null);
+    }
+  };
+
+  const formatRemaining = (session: ActiveAttendanceSession) => {
+    const serverNow = clockNow - (session.serverClockOffsetMs || 0);
+    const seconds = Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - serverNow) / 1000));
+    return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  };
 
   const filteredAssignments = assignments.filter((a) => {
     if (assignmentFilter === 'ALL') return true;
@@ -104,8 +236,8 @@ export default function AcademicsScreen() {
           </View>
           <View style={styles.semesterBadge}>
             <ThemedText style={styles.semesterText}>
-              {user?.profile?.semester ? `Sem ${user.profile.semester}` : 'Sem 6'}{' '}
-              ({user?.profile?.academicYear ?? '2025-26'})
+              {user?.profile?.semester ? `Sem ${user.profile.semester}` : 'Sem —'}{' '}
+              ({user?.profile?.academicYear ?? 'Academic year unavailable'})
             </ThemedText>
           </View>
         </View>
@@ -168,11 +300,7 @@ export default function AcademicsScreen() {
                 <View style={styles.circularGaugeCard}>
                   <View style={styles.gaugeHeader}>
                     <ThemedText style={styles.gaugeCardTitle}>Aggregate Attendance</ThemedText>
-                    <StatusBadge
-                      status={isGood ? 'APPROVED' : 'WARNING'}
-                      label={attendance?.status ?? 'Good Standing'}
-                      size="sm"
-                    />
+                    {attendance ? <StatusBadge status="ACTIVE" label="Recorded data" size="sm" /> : null}
                   </View>
 
                   <View style={styles.gaugeCenterRow}>
@@ -180,7 +308,7 @@ export default function AcademicsScreen() {
                     <View style={[styles.outerCircle, { borderColor: ringColor, backgroundColor: ringBg }]}>
                       <View style={styles.innerCircle}>
                         <ThemedText style={[styles.gaugePercentage, { color: ringColor }]}>
-                          {overallPct}%
+                          {overallPct === null || overallPct === undefined ? '—' : `${overallPct}%`}
                         </ThemedText>
                         <ThemedText style={styles.gaugeCaption}>Overall</ThemedText>
                       </View>
@@ -192,7 +320,7 @@ export default function AcademicsScreen() {
                         <View style={[styles.dotIndicator, { backgroundColor: '#10B981' }]} />
                         <ThemedText style={styles.breakdownLabel}>Attended:</ThemedText>
                         <ThemedText style={styles.breakdownValue}>
-                          {attendance?.totalPresent ?? 115} classes
+                          {attendance ? `${attendance.totalPresent} classes` : '—'}
                         </ThemedText>
                       </View>
 
@@ -200,15 +328,15 @@ export default function AcademicsScreen() {
                         <View style={[styles.dotIndicator, { backgroundColor: '#EF4444' }]} />
                         <ThemedText style={styles.breakdownLabel}>Absent:</ThemedText>
                         <ThemedText style={styles.breakdownValue}>
-                          {attendance?.totalAbsent ?? 20} classes
+                          {attendance ? `${attendance.totalAbsent} classes` : '—'}
                         </ThemedText>
                       </View>
 
                       <View style={styles.breakdownRow}>
-                        <View style={[styles.dotIndicator, { backgroundColor: '#F59E0B' }]} />
-                        <ThemedText style={styles.breakdownLabel}>Late Entry:</ThemedText>
+                        <View style={[styles.dotIndicator, { backgroundColor: '#94A3B8' }]} />
+                        <ThemedText style={styles.breakdownLabel}>Unmarked:</ThemedText>
                         <ThemedText style={styles.breakdownValue}>
-                          {attendance?.totalLate ?? 5} classes
+                          {attendance ? `${attendance.unmarkedCount} sessions` : '—'}
                         </ThemedText>
                       </View>
 
@@ -216,57 +344,134 @@ export default function AcademicsScreen() {
 
                       <View style={styles.breakdownRow}>
                         <Ionicons name="school-outline" size={14} color="#64748B" />
-                        <ThemedText style={styles.breakdownLabel}>Conducted:</ThemedText>
+                        <ThemedText style={styles.breakdownLabel}>Lectures:</ThemedText>
                         <ThemedText style={styles.breakdownValueBold}>
-                          {attendance?.totalConducted ?? 140} total
+                          {attendance ? `${attendance.totalApplicableLectures}` : '—'}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.breakdownRow}>
+                        <Ionicons name="flask-outline" size={14} color="#64748B" />
+                        <ThemedText style={styles.breakdownLabel}>Lab sessions:</ThemedText>
+                        <ThemedText style={styles.breakdownValueBold}>
+                          {attendance ? `${attendance.totalApplicableLabSessions}` : '—'}
                         </ThemedText>
                       </View>
                     </View>
                   </View>
 
-                  {/* 75% Criteria Advisory Banner */}
-                  <View
-                    style={[
-                      styles.advisoryBanner,
-                      isGood ? styles.advisoryGood : styles.advisoryWarning,
-                    ]}>
-                    <Ionicons
-                      name={isGood ? 'shield-checkmark' : 'alert-circle'}
-                      size={16}
-                      color={isGood ? '#059669' : '#D97706'}
-                    />
-                    <ThemedText
-                      style={[
-                        styles.advisoryText,
-                        { color: isGood ? '#065F46' : '#92400E' },
-                      ]}>
-                      {isGood
-                        ? 'You meet the 75% attendance criterion for semester exams.'
-                        : 'Attendance below 75% requires urgent catch-up before exam eligibility.'}
+                  <View style={[styles.advisoryBanner, styles.advisoryGood]}>
+                    <Ionicons name="information-circle-outline" size={16} color="#0369A1" />
+                    <ThemedText style={[styles.advisoryText, { color: '#075985' }]}>
+                      {attendance?.attendanceBasis || 'Attendance information is unavailable.'}
                     </ThemedText>
                   </View>
                 </View>
+
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>Active Attendance Sessions</ThemedText>
+                  <ThemedText style={styles.sectionMeta}>Refreshes every 5 seconds</ThemedText>
+                </View>
+                {activeSessionsError ? (
+                  <EmptyState icon="alert-circle-outline" title="Sessions Unavailable" message={activeSessionsError} />
+                ) : activeSessions.length === 0 ? (
+                  <EmptyState icon="time-outline" title="No Active Sessions" message="No active faculty attendance session currently matches your class and enrollment." />
+                ) : activeSessions.map((session) => {
+                  const remaining = formatRemaining(session);
+                  const expired = remaining === '00:00';
+                  return (
+                    <View key={session.id} style={styles.activeSessionCard}>
+                      <View style={styles.activeSessionHeader}>
+                        <View style={{ flex: 1 }}>
+                          <ThemedText style={styles.activeSessionSubject}>{session.subject.name}</ThemedText>
+                          <ThemedText style={styles.activeSessionMeta}>{session.subject.code} · {session.faculty}</ThemedText>
+                        </View>
+                        <ThemedText style={[styles.sessionTimer, expired && styles.sessionExpired]}>
+                          {expired ? 'Expired' : remaining}
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={styles.activeSessionMeta}>
+                        {session.academicYear} · {session.year} · Semester {session.semester} · Division {session.division}{session.labBatch ? ` · Lab ${session.labBatch}` : ''}
+                      </ThemedText>
+                      {session.attendanceStatus === 'PRESENT' ? (
+                        <ThemedText style={styles.confirmedText}>Your attendance is recorded as present.</ThemedText>
+                      ) : session.attendanceStatus === 'ABSENT' ? (
+                        <ThemedText style={styles.checkInError}>Attendance is already marked. Contact faculty if it needs correction.</ThemedText>
+                      ) : (
+                        <View style={styles.checkInRow}>
+                          <TextInput
+                            value={joinCodes[session.id] || ''}
+                            onChangeText={(value) => setJoinCodes((current) => ({ ...current, [session.id]: value.replace(/\D/g, '').slice(0, 6) }))}
+                            keyboardType="number-pad"
+                            maxLength={6}
+                            placeholder="Six-digit code"
+                            placeholderTextColor="#94A3B8"
+                            style={styles.joinCodeInput}
+                            accessibilityLabel="Six-digit attendance code"
+                          />
+                          <Pressable
+                            style={({ pressed }) => [styles.checkInButton, pressed && styles.pressed, (expired || checkingInId === session.id || (joinCodes[session.id] || '').length !== 6) && styles.disabledButton]}
+                            disabled={expired || checkingInId === session.id || (joinCodes[session.id] || '').length !== 6}
+                            onPress={() => handleCheckIn(session)}>
+                            <ThemedText style={styles.checkInButtonText}>{checkingInId === session.id ? 'Checking…' : 'Check in'}</ThemedText>
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+                {checkInError ? <ThemedText style={styles.checkInError}>{checkInError}</ThemedText> : null}
+
+                <View style={styles.sectionHeader}>
+                  <ThemedText style={styles.sectionTitle}>Enrolled Subjects</ThemedText>
+                  <ThemedText style={styles.sectionMeta}>{subjectsError ? 'Unavailable' : `${subjectEnrollments.length} records`}</ThemedText>
+                </View>
+                {subjectsError ? (
+                  <EmptyState icon="alert-circle-outline" title="Subjects Unavailable" message={subjectsError} />
+                ) : subjectEnrollments.length === 0 ? (
+                  <EmptyState icon="book-outline" title="No Subject Enrollments" message="No subject enrollment records are available for your profile." />
+                ) : subjectEnrollments.map((enrollment) => {
+                  const subject = enrollment.subject;
+                  const matchingFaculty = (subject?.facultyAssignments || []).filter((assignment: any) =>
+                    assignment.academicYear === enrollment.academicYear
+                  );
+                  const facultyNames = [...new Set(matchingFaculty.map((assignment: any) => assignment.faculty?.user?.name).filter(Boolean))];
+                  return (
+                    <View key={enrollment.id} style={styles.enrolledSubjectCard}>
+                      <View style={{ flex: 1 }}>
+                        <ThemedText style={styles.activeSessionSubject}>{subject?.subjectName || 'Subject name unavailable'}</ThemedText>
+                        <ThemedText style={styles.activeSessionMeta}>
+                          {subject?.subjectCode || 'Code unavailable'} · {enrollment.academicYear} · {enrollment.status}
+                        </ThemedText>
+                        <ThemedText style={styles.activeSessionMeta}>
+                          {facultyNames.length ? facultyNames.join(', ') : 'Faculty assignment unavailable'}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  );
+                })}
 
                 {/* ── Subject-Wise Attendance (AttendanceCard) ── */}
                 <View style={styles.sectionHeader}>
                   <ThemedText style={styles.sectionTitle}>Course-wise Attendance</ThemedText>
                   <ThemedText style={styles.sectionMeta}>
-                    {attendance?.subjects?.length ?? 0} Subjects
+                    {attendanceError ? 'Unavailable' : `${attendance?.subjects?.length ?? 0} Subjects`}
                   </ThemedText>
                 </View>
 
-                {(attendance?.subjects ?? []).length === 0 ? (
+                {attendanceError ? (
+                  <EmptyState icon="alert-circle-outline" title="Attendance Unavailable" message={attendanceError} />
+                ) : (attendance?.subjects ?? []).length === 0 ? (
                   <EmptyState
                     icon="book-outline"
-                    title="No Subjects Found"
-                    message="Subject attendance records are being synchronized."
+                    title="No Completed Attendance"
+                    message="There are no completed attendance sessions for your enrolled subjects yet."
                   />
                 ) : (
                   attendance?.subjects.map((sub) => (
                     <AttendanceCard
                       key={sub.id}
                       item={sub}
-                      minRequired={attendance?.minimumRequired ?? 75}
+                      minRequired={attendance?.minimumRequired ?? null}
                     />
                   ))
                 )}
@@ -277,7 +482,11 @@ export default function AcademicsScreen() {
                   <ThemedText style={styles.sectionMeta}>Latest Sessions</ThemedText>
                 </View>
 
-                <View style={styles.historyList}>
+                {attendanceError ? (
+                  <EmptyState icon="alert-circle-outline" title="History Unavailable" message={attendanceError} />
+                ) : (attendance?.history ?? []).length === 0 ? (
+                  <EmptyState icon="calendar-outline" title="No Attendance History" message="No attendance records have been finalized for you yet." />
+                ) : <View style={styles.historyList}>
                   {(attendance?.history ?? []).map((h) => (
                     <View key={h.id} style={styles.historyItem}>
                       <View style={styles.historyLeft}>
@@ -289,6 +498,9 @@ export default function AcademicsScreen() {
                           <Ionicons name="time-outline" size={12} color="#94A3B8" />
                           <ThemedText style={styles.historyTime}>{h.time}</ThemedText>
                         </View>
+                        <ThemedText style={styles.historyDate}>
+                          {h.sessionType} · Division {h.division}{h.labBatch ? ` · ${h.labBatch}` : ''} · {h.faculty || 'Faculty unavailable'}
+                        </ThemedText>
                       </View>
                       <StatusBadge
                         status={
@@ -296,15 +508,13 @@ export default function AcademicsScreen() {
                             ? 'PRESENT'
                             : h.status === 'ABSENT'
                             ? 'ABSENT'
-                            : h.status === 'LATE'
-                            ? 'LATE'
-                            : 'EXCUSED'
+                            : 'ABSENT'
                         }
                         size="sm"
                       />
                     </View>
                   ))}
-                </View>
+                </View>}
               </>
             )}
 
@@ -343,7 +553,9 @@ export default function AcademicsScreen() {
                   )}
                 </ScrollView>
 
-                {filteredAssignments.length === 0 ? (
+                {assignmentsError ? (
+                  <EmptyState icon="alert-circle-outline" title="Assignments Unavailable" message={assignmentsError} />
+                ) : filteredAssignments.length === 0 ? (
                   <EmptyState
                     icon="clipboard-outline"
                     title="No Assignments Found"
@@ -355,11 +567,11 @@ export default function AcademicsScreen() {
                     const isOverdue = a.status === 'Overdue';
 
                     return (
-                      <Pressable
+                      <View
                         key={a.id}
                         style={[styles.assignCard, isOverdue && styles.assignCardOverdue]}
-                        onPress={() => setExpandedAssignmentId(isExpanded ? null : a.id)}>
-                        <View style={styles.assignTopRow}>
+                        >
+                        <Pressable style={styles.assignTopRow} onPress={() => setExpandedAssignmentId(isExpanded ? null : a.id)}>
                           <View style={styles.assignInfo}>
                             <ThemedText style={styles.assignTitle}>{a.title}</ThemedText>
                             <ThemedText style={styles.assignSubject}>
@@ -379,7 +591,7 @@ export default function AcademicsScreen() {
                             label={a.status}
                             size="sm"
                           />
-                        </View>
+                        </Pressable>
 
                         {/* Marks & Due Date Row */}
                         <View style={styles.assignMetaRow}>
@@ -399,23 +611,29 @@ export default function AcademicsScreen() {
                             </View>
                           )}
                         </View>
-
                         {/* Expandable details: Instructions */}
-                        {isExpanded && a.description && (
+                        {isExpanded && (
                           <View style={styles.assignExpandedContent}>
-                            <ThemedText style={styles.assignDescLabel}>Instructions & Scope:</ThemedText>
-                            <ThemedText style={styles.assignDescText}>{a.description}</ThemedText>
-                            <View style={styles.assignActionRow}>
-                              <Pressable style={styles.submitBtn}>
-                                <Ionicons name="cloud-upload-outline" size={16} color="#FFFFFF" />
-                                <ThemedText style={styles.submitBtnText}>
-                                  {a.status === 'Submitted' ? 'Re-upload Work' : 'Submit Assignment'}
-                                </ThemedText>
-                              </Pressable>
-                            </View>
+                            {a.description ? <><ThemedText style={styles.assignDescLabel}>Instructions & Scope:</ThemedText><ThemedText style={styles.assignDescText}>{a.description}</ThemedText></> : null}
+                            {a.attachmentUrl ? <Pressable onPress={() => Linking.openURL(a.attachmentUrl!)}><ThemedText style={styles.unavailableAction}>Open assignment attachment</ThemedText></Pressable> : null}
+                            {a.submission ? (
+                              <View style={styles.assignSubmissionBox}>
+                                <ThemedText style={styles.assignDescLabel}>Your submission</ThemedText>
+                                <ThemedText style={styles.assignDescText}>{a.submission.responseText || a.submission.attachmentName || 'Submitted response'}</ThemedText>
+                                {a.feedback ? <ThemedText style={styles.assignDescText}>Feedback: {a.feedback}</ThemedText> : null}
+                              </View>
+                            ) : isOverdue ? <ThemedText style={styles.unavailableAction}>The deadline has passed.</ThemedText> : (
+                              <View style={styles.assignSubmissionBox}>
+                                <ThemedText style={styles.assignDescLabel}>Submit response</ThemedText>
+                                <TextInput value={submissionText} onChangeText={setSubmissionText} multiline placeholder="Write your response" placeholderTextColor="#94A3B8" style={styles.assignmentResponseInput} />
+                                <Pressable disabled={submittingAssignmentId === a.id} onPress={() => handleAssignmentSubmit(a)} style={[styles.checkInButton, submittingAssignmentId === a.id && styles.disabledButton]}>
+                                  <ThemedText style={styles.checkInButtonText}>{submittingAssignmentId === a.id ? 'Submitting…' : 'Submit assignment'}</ThemedText>
+                                </Pressable>
+                              </View>
+                            )}
                           </View>
                         )}
-                      </Pressable>
+                      </View>
                     );
                   })
                 )}
@@ -432,7 +650,9 @@ export default function AcademicsScreen() {
                   <ThemedText style={styles.sectionMeta}>{projects.length} Active</ThemedText>
                 </View>
 
-                {projects.length === 0 ? (
+                {projectsError ? (
+                  <EmptyState icon="alert-circle-outline" title="Projects Unavailable" message={projectsError} />
+                ) : projects.length === 0 ? (
                   <EmptyState
                     icon="git-network-outline"
                     title="No Projects Assigned"
@@ -497,10 +717,12 @@ export default function AcademicsScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <ThemedText style={styles.sectionTitle}>Syllabus & Lecture Notes</ThemedText>
-                  <ThemedText style={styles.sectionMeta}>Semester 3</ThemedText>
+                  <ThemedText style={styles.sectionMeta}>{user?.profile?.semester ? `Semester ${user.profile.semester}` : 'Academic period unavailable'}</ThemedText>
                 </View>
 
-                {studyPlans.length === 0 ? (
+                {studyPlansError ? (
+                  <EmptyState icon="alert-circle-outline" title="Study Plans Unavailable" message={studyPlansError} />
+                ) : studyPlans.length === 0 ? (
                   <EmptyState
                     icon="book-outline"
                     title="No Study Material"
@@ -527,9 +749,7 @@ export default function AcademicsScreen() {
                           )}
                         </View>
                       </View>
-                      <Pressable style={styles.downloadBtn}>
-                        <Ionicons name="download-outline" size={18} color="#2563EB" />
-                      </Pressable>
+                      {plan.fileUrl ? <Pressable style={styles.downloadBtn} onPress={() => Linking.openURL(plan.fileUrl!)} accessibilityRole="button" accessibilityLabel="Open study plan"><Ionicons name="download-outline" size={18} color="#2563EB" /></Pressable> : <ThemedText style={styles.planMetaText}>No file</ThemedText>}
                     </View>
                   ))
                 )}
@@ -547,6 +767,7 @@ export default function AcademicsScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  pressed: { opacity: 0.8 },
   root: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -735,8 +956,30 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 12,
   },
+  activeSessionCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 16,
+    padding: 14,
+    gap: 9,
+  },
+  enrolledSubjectCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 14, padding: 13 },
+  activeSessionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  activeSessionSubject: { color: Navy.primary, fontSize: 15, fontWeight: '800' },
+  activeSessionMeta: { color: '#64748B', fontSize: 12, lineHeight: 17 },
+  sessionTimer: { color: '#047857', fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  sessionExpired: { color: '#B91C1C' },
+  checkInRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  joinCodeInput: { flex: 1, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: Navy.primary, letterSpacing: 3, fontSize: 16 },
+  checkInButton: { backgroundColor: Navy.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  checkInButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  disabledButton: { opacity: 0.5 },
+  confirmedText: { color: '#047857', fontSize: 13, fontWeight: '700' },
+  checkInError: { color: '#B91C1C', fontSize: 12, lineHeight: 17 },
+  unavailableAction: { color: '#64748B', fontSize: 12, marginTop: 10 },
   advisoryGood: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#EFF6FF',
   },
   advisoryWarning: {
     backgroundColor: '#FFFBEB',
@@ -907,6 +1150,25 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
+  },
+  assignSubmissionBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  assignmentResponseInput: {
+    minHeight: 88,
+    textAlignVertical: 'top',
+    borderColor: '#CBD5E1',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    color: '#0F172A',
+    backgroundColor: '#FFFFFF',
   },
   assignDescLabel: {
     fontSize: 11,

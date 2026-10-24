@@ -4,7 +4,7 @@ const errorHandler = (err, req, res, next) => {
   if (err.code === "P2002") {
     return res.status(409).json({
       success: false,
-      message: "An account with this email already exists",
+      message: "This record conflicts with an existing record.",
     });
   }
 

@@ -16,7 +16,7 @@ import StatusBadge from '@/components/student/StatusBadge';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Navy, Spacing } from '@/constants/theme';
-import { CampusEvent, getStudentEvents, registerForEvent } from '@/services/studentService';
+import { CampusEvent, cancelEventRegistration, getStudentEvents, registerForEvent } from '@/services/studentService';
 
 type EventCategory = 'ALL' | 'Technical' | 'Cultural' | 'Workshop' | 'Academic';
 type ViewMode = 'EXPLORE' | 'MY_REGISTRATIONS';
@@ -28,14 +28,17 @@ export default function EventsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('EXPLORE');
   const [selectedCategory, setSelectedCategory] = useState<EventCategory>('ALL');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState('');
 
   const fetchData = async () => {
     try {
       const res = await getStudentEvents();
       const list = res.data?.events ?? [];
       setEvents(list);
-    } catch (_) {
-      // safe fallback
+      setEventsError('');
+    } catch {
+      setEvents([]);
+      setEventsError('Events are unavailable because no student events service is connected.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -62,23 +65,38 @@ export default function EventsScreen() {
           style: 'default',
           onPress: async () => {
             try {
-              await registerForEvent(eventId);
-              // Optimistic update
-              setEvents((prev) =>
-                prev.map((ev) =>
-                  ev.id === eventId
-                    ? { ...ev, isRegistered: true, participants: ev.participants + 1 }
-                    : ev
-                )
-              );
-              Alert.alert('Registration Successful! 🎉', 'Your digital entry pass has been generated. See you at the event!');
-            } catch (_) {
-              Alert.alert('Error', 'Unable to complete registration. Please try again.');
+              const result = await registerForEvent(eventId);
+              if (result.data?.success !== true) throw new Error('The server did not confirm registration.');
+              const refreshed = await getStudentEvents();
+              const currentEvents = refreshed.data?.events ?? [];
+              setEvents(currentEvents);
+              if (!currentEvents.find((event: CampusEvent) => event.id === eventId)?.isRegistered) {
+                throw new Error('Registration was not present in the refreshed event record.');
+              }
+              Alert.alert('Registration confirmed', 'The server confirmed your event registration.');
+            } catch (error: any) {
+              Alert.alert('Registration unavailable', error?.response?.data?.message || error?.message || 'Unable to complete registration.');
             }
           },
         },
       ]
     );
+  };
+
+  const handleCancelRegistration = (event: CampusEvent) => {
+    Alert.alert('Cancel registration', `Cancel your registration for "${event.name}"?`, [
+      { text: 'Keep registration', style: 'cancel' },
+      { text: 'Cancel registration', style: 'destructive', onPress: async () => {
+        try {
+          const result = await cancelEventRegistration(event.id);
+          if (result.data?.success !== true || result.data?.cancelled !== true) throw new Error('The server did not confirm cancellation.');
+          await fetchData();
+          Alert.alert('Registration cancelled', 'The server confirmed the cancellation.');
+        } catch (error: any) {
+          Alert.alert('Cancellation unavailable', error?.response?.data?.message || error?.message || 'Unable to cancel registration.');
+        }
+      } },
+    ]);
   };
 
   // Filter events based on viewMode and selectedCategory
@@ -101,7 +119,7 @@ export default function EventsScreen() {
           </View>
           <View style={styles.badgePill}>
             <Ionicons name="sparkles" size={13} color="#D97706" />
-            <ThemedText style={styles.badgePillText}>{events.length} Upcoming</ThemedText>
+            <ThemedText style={styles.badgePillText}>{eventsError ? 'Unavailable' : `${events.filter((event) => event.status === 'Upcoming').length} Upcoming`}</ThemedText>
           </View>
         </View>
 
@@ -181,7 +199,9 @@ export default function EventsScreen() {
                 colors={[Navy.primary]}
               />
             }>
-            {displayedEvents.length === 0 ? (
+            {eventsError ? (
+              <EmptyState icon="alert-circle-outline" title="Events Unavailable" message={eventsError} />
+            ) : displayedEvents.length === 0 ? (
               <EmptyState
                 icon="ticket-outline"
                 title={
@@ -276,15 +296,19 @@ export default function EventsScreen() {
                         />
                       </Pressable>
 
-                      {!isCompleted && (
+                      {!isCompleted && ev.isRegistered && ev.canCancel ? (
+                        <Pressable style={styles.detailsToggleBtn} onPress={() => handleCancelRegistration(ev)}>
+                          <ThemedText style={styles.detailsToggleText}>Cancel registration</ThemedText>
+                        </Pressable>
+                      ) : !isCompleted && (
                         <Pressable
                           style={({ pressed }) => [
                             styles.regBtn,
                             ev.isRegistered && styles.regBtnRegistered,
                             pressed && styles.pressed,
                           ]}
-                          onPress={() => !ev.isRegistered && handleRegister(ev.id, ev.name)}
-                          disabled={ev.isRegistered}>
+                          onPress={() => !ev.isRegistered && ev.canRegister && handleRegister(ev.id, ev.name)}
+                          disabled={ev.isRegistered || !ev.canRegister}>
                           <Ionicons
                             name={ev.isRegistered ? 'checkmark-circle' : 'ticket-outline'}
                             size={14}
@@ -295,7 +319,7 @@ export default function EventsScreen() {
                               styles.regBtnText,
                               ev.isRegistered && styles.regBtnTextRegistered,
                             ]}>
-                            {ev.isRegistered ? 'Registered' : 'Register'}
+                            {ev.isRegistered ? 'Registered' : ev.canRegister ? 'Register' : 'Registration closed'}
                           </ThemedText>
                         </Pressable>
                       )}

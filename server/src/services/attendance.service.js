@@ -1,3 +1,4 @@
+const { randomInt } = require("crypto");
 const prisma = require("../config/prisma");
 const { normalizeDivision: normalizeLabDivision, isValidLabBatch } = require("../utils/labBatch");
 
@@ -434,6 +435,28 @@ function buildSessionPayload(session, extra = {}) {
   };
 }
 
+async function ensureJoinCode(sessionId, existingCode) {
+  if (existingCode && /^\d{6}$/.test(existingCode)) return existingCode;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const joinCode = String(randomInt(0, 1000000)).padStart(6, "0");
+    try {
+      const updated = await prisma.attendanceSession.updateMany({
+        where: { id: sessionId, joinCode: existingCode ?? null },
+        data: { joinCode },
+      });
+      if (updated.count === 1) return joinCode;
+      const current = await prisma.attendanceSession.findUnique({
+        where: { id: sessionId },
+        select: { joinCode: true },
+      });
+      if (current?.joinCode && /^\d{6}$/.test(current.joinCode)) return current.joinCode;
+    } catch (error) {
+      if (error.code !== "P2002") throw error;
+    }
+  }
+  throw new AttendanceError("Could not create a unique attendance code. Please retry.", 503);
+}
+
 function sessionRosterOptions(session) {
   const legacyLabWithoutBatch = isLabAttendance(session) && !session.labBatch;
   return {
@@ -524,6 +547,7 @@ async function createSession(userId, payload) {
   if (activeDuplicate) {
     const err = new AttendanceError("An attendance window is already active for this class", 409);
     err.session = buildSessionPayload(activeDuplicate, {
+      joinCode: activeDuplicate.joinCode || null,
       stats: await getSessionStats(activeDuplicate),
     });
     throw err;
@@ -583,7 +607,8 @@ async function startSession(userId, sessionId) {
   }
 
   if (session.status === "ACTIVE" && !isExpired(session, now)) {
-    return buildSessionPayload(session, { stats: await getSessionStats(session) });
+    const joinCode = await ensureJoinCode(session.id, session.joinCode);
+    return buildSessionPayload(session, { joinCode, stats: await getSessionStats(session) });
   }
 
   const sessionIsLab = isLabAttendance(session);
@@ -622,17 +647,38 @@ async function startSession(userId, sessionId) {
   }
 
   const expiresAt = new Date(now.getTime() + (session.windowDurationSeconds || DEFAULT_WINDOW_SECONDS) * 1000);
-  const started = await prisma.attendanceSession.update({
-    where: { id: session.id },
-    data: {
-      status: "ACTIVE",
-      startedAt: now,
-      expiresAt,
-    },
-    include: sessionInclude(),
-  });
+  let started;
+  let joinCode;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    joinCode = String(randomInt(0, 1000000)).padStart(6, "0");
+    try {
+      const updated = await prisma.attendanceSession.updateMany({
+        where: { id: session.id, status: "NOT_STARTED" },
+        data: { status: "ACTIVE", startedAt: now, expiresAt, joinCode },
+      });
+      if (updated.count === 1) {
+        started = await prisma.attendanceSession.findUnique({
+          where: { id: session.id },
+          include: sessionInclude(),
+        });
+        break;
+      }
+      const current = await prisma.attendanceSession.findUnique({
+        where: { id: session.id },
+        include: sessionInclude(),
+      });
+      if (current?.status === "ACTIVE" && !isExpired(current, new Date())) {
+        const existingJoinCode = await ensureJoinCode(current.id, current.joinCode);
+        return buildSessionPayload(current, { joinCode: existingJoinCode, stats: await getSessionStats(current) });
+      }
+      throw new AttendanceError("This attendance session was changed. Refresh the session before trying again.", 409);
+    } catch (error) {
+      if (error.code !== "P2002") throw error;
+    }
+  }
+  if (!started) throw new AttendanceError("Could not create a unique attendance code. Please retry.", 503);
 
-  return buildSessionPayload(started, { stats: await getSessionStats(started) });
+  return buildSessionPayload(started, { joinCode, stats: await getSessionStats(started) });
 }
 
 async function getActiveSession(userId) {
@@ -652,14 +698,17 @@ async function getActiveSession(userId) {
 
   const current = await expireSessionIfNeeded(session);
   if (effectiveStatus(current) !== "ACTIVE") return null;
-  return buildSessionPayload(current, { stats: await getSessionStats(current) });
+  return buildSessionPayload(current, { joinCode: current.joinCode || null, stats: await getSessionStats(current) });
 }
 
 async function getSession(userId, sessionId) {
   const faculty = await getFacultyContext(userId);
   assertItFaculty(faculty);
   const session = await getOwnedSession(sessionId, faculty.id);
-  return buildSessionPayload(session, { stats: await getSessionStats(session) });
+  return buildSessionPayload(session, {
+    joinCode: session.status === "ACTIVE" ? session.joinCode || null : null,
+    stats: await getSessionStats(session),
+  });
 }
 
 async function getSessionStudents(userId, sessionId) {
@@ -699,7 +748,10 @@ async function getSessionStudents(userId, sessionId) {
   const recordsByStudent = new Map((session.records || []).map((record) => [record.studentId, record]));
 
   return {
-    session: buildSessionPayload(session, { stats: await getSessionStats(session) }),
+    session: buildSessionPayload(session, {
+      joinCode: session.status === "ACTIVE" ? session.joinCode || null : null,
+      stats: await getSessionStats(session),
+    }),
     students: students.map((student) => {
       const record = recordsByStudent.get(student.id);
       return {

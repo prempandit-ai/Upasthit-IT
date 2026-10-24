@@ -1,19 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useCallback, useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../../components/shared/PageHeader';
 import { useToast } from '../../../context/ToastContext';
 import { getEvents, getFacultyList, mapFacultyToEvent } from '../../../services/coordinatorService';
 import {
   ArrowsRightLeftIcon,
   AcademicCapIcon,
-  CalendarDaysIcon,
-  CheckBadgeIcon,
   PlusIcon,
-  TrashIcon,
 } from '@heroicons/react/24/outline';
 
 const FacultyMappingPage = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialEventId = searchParams.get('eventId') || '';
   const { showToast } = useToast();
@@ -25,29 +21,28 @@ const FacultyMappingPage = () => {
   const [selectedRole, setSelectedRole] = useState('Attendance Tracking');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [evts, facs] = await Promise.all([getEvents(), getFacultyList()]);
       setEvents(evts);
       setFacultyList(facs);
-      if (evts.length > 0 && !selectedEventId) {
-        setSelectedEventId(evts[0].id);
-      }
+      if (evts.length > 0) setSelectedEventId((current) => current || evts[0].id);
       if (facs.length > 0) {
         setSelectedFacultyId(facs[0].id);
       }
     } catch (err) {
       console.error(err);
+      setLoadError(err?.response?.data?.message || err?.message || 'Unable to load event and faculty records.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const currentEvent = events.find((e) => e.id === selectedEventId);
 
@@ -66,9 +61,9 @@ const FacultyMappingPage = () => {
         responsibility: selectedRole,
       });
       showToast('Faculty mapping updated successfully', 'success');
-      loadData();
+      await loadData();
     } catch (err) {
-      showToast('Failed to map faculty', 'error');
+      showToast(err?.response?.data?.message || err?.message || 'Failed to map faculty.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -84,6 +79,8 @@ const FacultyMappingPage = () => {
           { label: 'Faculty Mapping' },
         ]}
       />
+
+      {loadError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}<button type="button" onClick={loadData} className="ml-3 font-semibold underline">Retry</button></p>}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Form: Assign Role (5 Cols) */}
@@ -101,6 +98,7 @@ const FacultyMappingPage = () => {
               <select
                 value={selectedEventId}
                 onChange={(e) => setSelectedEventId(e.target.value)}
+                disabled={loading}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold outline-none focus:border-blue-500"
               >
                 {events.map((e) => (
@@ -118,6 +116,7 @@ const FacultyMappingPage = () => {
               <select
                 value={selectedFacultyId}
                 onChange={(e) => setSelectedFacultyId(e.target.value)}
+                disabled={loading}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500"
               >
                 {facultyList.map((f) => (
@@ -149,7 +148,7 @@ const FacultyMappingPage = () => {
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || loading}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-blue-700 disabled:opacity-50 transition"
               >
                 <PlusIcon className="h-4 w-4" />
@@ -161,9 +160,7 @@ const FacultyMappingPage = () => {
           {/* Guidelines Box */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2 text-xs text-slate-600">
             <h4 className="font-bold text-slate-900">Attendance Permission Note</h4>
-            <p>
-              Assigning faculty to <strong>Attendance Tracking</strong> grants them permission in their Faculty Web & Mobile app to mark and submit live session attendance for this event.
-            </p>
+            <p>Event duty assignments are saved against the event roster. They do not grant subject attendance permissions, and event attendance is not currently connected to the lab attendance workflow.</p>
           </div>
         </div>
 

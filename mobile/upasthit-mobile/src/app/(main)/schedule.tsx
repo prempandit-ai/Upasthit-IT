@@ -58,6 +58,7 @@ export default function ScheduleScreen() {
   const [timetable, setTimetable] = useState<Record<string, TodayClass[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [timetableError, setTimetableError] = useState('');
 
   const fetchData = async () => {
     try {
@@ -65,8 +66,10 @@ export default function ScheduleScreen() {
       const resData = res.data as any;
       const data = resData?.days ?? resData?.timetable ?? resData ?? {};
       setTimetable(data);
-    } catch (_) {
-      // safe fallback
+      setTimetableError('');
+    } catch {
+      setTimetable({});
+      setTimetableError('A student timetable service is not connected yet.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -83,11 +86,7 @@ export default function ScheduleScreen() {
   };
 
   // Get classes for selected day
-  const dayClasses: TodayClass[] =
-    timetable[selectedDay] ||
-    (selectedDay === 'Saturday'
-      ? []
-      : timetable['Monday'] || []);
+  const dayClasses: TodayClass[] = timetable[selectedDay] || [];
 
   const lectureCount = dayClasses.filter((c) => c.type !== 'Lab').length;
   const labCount = dayClasses.filter((c) => c.type === 'Lab').length;
@@ -173,70 +172,26 @@ export default function ScheduleScreen() {
               />
             }>
             {/* ── Schedule Summary Metric Bar ── */}
-            <View style={styles.summaryBar}>
-              <View style={styles.summaryLeft}>
-                <ThemedText style={styles.summaryDayName}>{selectedDay}'s Schedule</ThemedText>
-                <ThemedText style={styles.summaryStats}>
-                  {lectureCount} Lecture{lectureCount !== 1 ? 's' : ''}
-                  {labCount > 0 ? ` • ${labCount} Lab Session` : ''} • ~
-                  {lectureCount + labCount * 1.5} Hours
-                </ThemedText>
-              </View>
-              <View style={styles.summaryRight}>
-                <View style={styles.locationPill}>
-                  <Ionicons name="business-outline" size={13} color="#2563EB" />
-                  <ThemedText style={styles.locationPillText}>Campus LH-3</ThemedText>
+            {!timetableError ? (
+              <View style={styles.summaryBar}>
+                <View style={styles.summaryLeft}>
+                  <ThemedText style={styles.summaryDayName}>{selectedDay}'s Schedule</ThemedText>
+                  <ThemedText style={styles.summaryStats}>
+                    {lectureCount} Lecture{lectureCount !== 1 ? 's' : ''}{labCount > 0 ? ` · ${labCount} Lab Session${labCount === 1 ? '' : 's'}` : ''}
+                  </ThemedText>
                 </View>
               </View>
-            </View>
-
+            ) : null}
             {/* ── Classes Timeline & Lunch Break ── */}
-            {dayClasses.length === 0 ? (
-              <EmptyState
-                icon="cafe-outline"
-                title={`No Classes on ${selectedDay}`}
-                message="No academic sessions scheduled. Use this time for project work, reading, or rest!"
-              />
+            {timetableError ? (
+              <EmptyState icon="alert-circle-outline" title="Timetable Unavailable" message={timetableError} />
+            ) : dayClasses.length === 0 ? (
+              <EmptyState icon="calendar-outline" title={`No Classes on ${selectedDay}`} message="No timetable entries are recorded for this day." />
             ) : (
               <View style={styles.timelineList}>
-                {dayClasses.slice(0, 3).map((cls) => (
-                  <ClassCard key={cls.id} cls={cls} />
-                ))}
-
-                {/* ── Lunch Break Slot Card ── */}
-                <View style={styles.lunchCard}>
-                  <View style={styles.lunchLeftBar} />
-                  <View style={styles.lunchContent}>
-                    <View style={styles.lunchHeaderRow}>
-                      <View style={styles.lunchTimeRow}>
-                        <Ionicons name="time-outline" size={14} color="#D97706" />
-                        <ThemedText style={styles.lunchTimeText}>
-                          01:00 PM - 02:00 PM
-                        </ThemedText>
-                      </View>
-                      <View style={styles.lunchBadge}>
-                        <ThemedText style={styles.lunchBadgeText}>RECESS</ThemedText>
-                      </View>
-                    </View>
-                    <ThemedText style={styles.lunchTitle}>
-                      Lunch & Campus Break
-                    </ThemedText>
-                    <View style={styles.lunchMetaRow}>
-                      <Ionicons name="restaurant-outline" size={13} color="#92400E" />
-                      <ThemedText style={styles.lunchMetaText}>
-                        Central Cafeteria / Student Lounge
-                      </ThemedText>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Afternoon lectures */}
-                {dayClasses.slice(3).map((cls) => (
-                  <ClassCard key={cls.id} cls={cls} />
-                ))}
+                {dayClasses.map((cls) => <ClassCard key={cls.id} cls={cls} />)}
               </View>
             )}
-
             <View style={{ height: BottomTabInset + Spacing.four }} />
           </ScrollView>
         )}

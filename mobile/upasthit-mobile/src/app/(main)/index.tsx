@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
   Pressable,
@@ -42,16 +43,20 @@ interface QuickAccessItem {
 
 export default function StudentHomeScreen() {
   const [stats, setStats] = useState<{
-    attendancePercentage: number;
-    attendanceStatus: string;
-    pendingAssignments: number;
-    cgpa: string | number;
-    upcomingTests: number;
+    attendancePercentage: number | null;
+    enrolledSubjectsCount: number;
+    pendingAssignmentCount: number;
+    unreadNotificationCount: number;
+    registeredUpcomingEvents: number;
   } | null>(null);
 
   const [todayClasses, setTodayClasses] = useState<TodayClass[]>([]);
   const [recentNotifs, setRecentNotifs] = useState<StudentNotification[]>([]);
   const [featuredEvent, setFeaturedEvent] = useState<CampusEvent | null>(null);
+  const [dashboardError, setDashboardError] = useState('');
+  const [scheduleError, setScheduleError] = useState('');
+  const [notificationsError, setNotificationsError] = useState('');
+  const [eventsError, setEventsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -67,31 +72,46 @@ export default function StudentHomeScreen() {
       if (dashRes.status === 'fulfilled') {
         const d = dashRes.value.data;
         setStats({
-          attendancePercentage: d?.attendancePercentage ?? 82,
-          attendanceStatus: d?.attendanceStatus ?? 'Good Standing',
-          pendingAssignments: d?.pendingAssignments ?? 2,
-          cgpa: d?.cgpa ?? 8.64,
-          upcomingTests: d?.upcomingTests ?? 2,
+          attendancePercentage: d?.attendancePercentage ?? null,
+          enrolledSubjectsCount: d?.enrolledSubjectsCount ?? 0,
+          pendingAssignmentCount: d?.pendingAssignmentCount ?? 0,
+          unreadNotificationCount: d?.unreadNotificationCount ?? 0,
+          registeredUpcomingEvents: d?.registeredUpcomingEvents ?? 0,
         });
+        setDashboardError('');
+      } else {
+        setStats(null);
+        setDashboardError('Dashboard information is unavailable. Pull to refresh and try again.');
       }
 
       if (classRes.status === 'fulfilled') {
         setTodayClasses(classRes.value.data?.classes ?? []);
+        setScheduleError('');
+      } else {
+        setTodayClasses([]);
+        setScheduleError('A student timetable is not available from the backend yet.');
       }
 
       if (notifRes.status === 'fulfilled') {
         const list = notifRes.value.data?.notifications ?? [];
         setRecentNotifs(list.slice(0, 2));
+        setNotificationsError('');
+      } else {
+        setRecentNotifs([]);
+        setNotificationsError('Student notifications are not available from the backend yet.');
       }
 
       if (eventRes.status === 'fulfilled') {
         const evs = eventRes.value.data?.events ?? [];
-        if (evs.length > 0) {
-          setFeaturedEvent(evs[0]);
-        }
+        const nextEvent = evs.find((event: CampusEvent) => event.status === 'Upcoming') || null;
+        if (nextEvent) {
+          setFeaturedEvent(nextEvent);
+        } else setFeaturedEvent(null);
+        setEventsError('');
+      } else {
+        setFeaturedEvent(null);
+        setEventsError('Student events are not available from the backend yet.');
       }
-    } catch (_) {
-      // safe fallback in service layer prevents crashes
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -101,6 +121,35 @@ export default function StudentHomeScreen() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    let focused = true;
+    const refreshDashboard = async () => {
+      try {
+        const { data } = await getStudentDashboard();
+        if (focused) {
+          setStats({
+            attendancePercentage: data?.attendancePercentage ?? null,
+            enrolledSubjectsCount: data?.enrolledSubjectsCount ?? 0,
+            pendingAssignmentCount: data?.pendingAssignmentCount ?? 0,
+            unreadNotificationCount: data?.unreadNotificationCount ?? 0,
+            registeredUpcomingEvents: data?.registeredUpcomingEvents ?? 0,
+          });
+          setDashboardError('');
+        }
+      } catch {
+        if (focused) {
+          setStats(null);
+          setDashboardError('Dashboard information is unavailable. Pull to refresh and try again.');
+        }
+      }
+    };
+    const poll = setInterval(refreshDashboard, 15000);
+    return () => {
+      focused = false;
+      clearInterval(poll);
+    };
+  }, []));
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -158,9 +207,9 @@ export default function StudentHomeScreen() {
     },
   ];
 
-  const attPct = stats?.attendancePercentage ?? 82;
-  const attColor = attPct >= 75 ? Navy.success : attPct >= 65 ? '#F59E0B' : Navy.error;
-  const attBg = attPct >= 75 ? '#F0FDF4' : attPct >= 65 ? '#FFFBEB' : '#FEF2F2';
+  const attPct = stats?.attendancePercentage;
+  const attColor = attPct == null ? '#64748B' : '#0284C7';
+  const attBg = attPct == null ? '#F8FAFC' : '#F0F9FF';
 
   return (
     <ThemedView style={styles.root}>
@@ -177,7 +226,7 @@ export default function StudentHomeScreen() {
             />
           }>
           {/* ── Student Greeting & Header ── */}
-          <StudentHeader unreadCount={2} />
+          <StudentHeader />
 
           {/* ── Summary Metrics ── */}
           {loading ? (
@@ -186,32 +235,60 @@ export default function StudentHomeScreen() {
             </View>
           ) : (
             <View style={styles.metricsGrid}>
+              {dashboardError ? <ThemedText style={styles.unavailableText}>{dashboardError}</ThemedText> : null}
               <StatCard
                 icon="checkmark-circle"
-                value={`${attPct}%`}
+                value={attPct == null ? '—' : `${attPct}%`}
                 label="Attendance"
-                subLabel={stats?.attendanceStatus ?? 'Good Standing'}
+                subLabel={attPct == null ? 'No marked sessions' : 'Recorded attendance'}
                 color={attColor}
                 bgColor={attBg}
                 onPress={() => router.push('/(main)/academics' as any)}
               />
               <StatCard
                 icon="document-text"
-                value={stats?.pendingAssignments ?? 2}
-                label="Pending"
-                subLabel="Assignments"
+                value={stats?.enrolledSubjectsCount ?? '—'}
+                label="Subjects"
+                subLabel="Active enrollments"
                 color="#7C3AED"
                 bgColor="#F5F3FF"
                 onPress={() => router.push('/(main)/academics' as any)}
               />
               <StatCard
                 icon="school"
-                value={stats?.cgpa ?? '8.64'}
+                value="—"
                 label="CGPA"
-                subLabel="Cumulative"
+                subLabel="Unavailable"
                 color="#0284C7"
                 bgColor="#F0F9FF"
                 onPress={() => router.push('/(main)/profile' as any)}
+              />
+              <StatCard
+                icon="clipboard"
+                value={stats?.pendingAssignmentCount ?? '—'}
+                label="Pending assignments"
+                subLabel="Published coursework"
+                color="#7C3AED"
+                bgColor="#F5F3FF"
+                onPress={() => router.push('/(main)/academics' as any)}
+              />
+              <StatCard
+                icon="notifications"
+                value={stats?.unreadNotificationCount ?? '—'}
+                label="Unread notices"
+                subLabel="Saved notifications"
+                color="#4F46E5"
+                bgColor="#EEF2FF"
+                onPress={() => router.push('/(main)/notifications' as any)}
+              />
+              <StatCard
+                icon="ticket"
+                value={stats?.registeredUpcomingEvents ?? '—'}
+                label="Registered events"
+                subLabel="Upcoming registrations"
+                color="#E11D48"
+                bgColor="#FFF1F2"
+                onPress={() => router.push('/(main)/events' as any)}
               />
             </View>
           )}
@@ -262,11 +339,13 @@ export default function StudentHomeScreen() {
             </Pressable>
           </View>
 
-          {todayClasses.length === 0 ? (
+          {scheduleError ? (
+            <EmptyState icon="alert-circle-outline" title="Schedule Unavailable" message={scheduleError} />
+          ) : todayClasses.length === 0 ? (
             <EmptyState
               icon="calendar-outline"
-              title="No Classes Today"
-              message="No lecture slots scheduled for today. Enjoy your self-study time!"
+              title="No Classes Scheduled"
+              message="There are no timetable entries for today."
             />
           ) : (
             <View style={styles.classesTimeline}>
@@ -287,11 +366,13 @@ export default function StudentHomeScreen() {
             </Pressable>
           </View>
 
-          {recentNotifs.length === 0 ? (
+          {notificationsError ? (
+            <EmptyState icon="alert-circle-outline" title="Notifications Unavailable" message={notificationsError} />
+          ) : recentNotifs.length === 0 ? (
             <EmptyState
               icon="notifications-off-outline"
-              title="No New Notices"
-              message="You are all caught up with official notices."
+              title="No Notifications"
+              message="There are no notifications for this account."
             />
           ) : (
             recentNotifs.map((notif) => (
@@ -319,7 +400,7 @@ export default function StudentHomeScreen() {
           )}
 
           {/* ── Featured Upcoming Event Preview ── */}
-          {featuredEvent && (
+          {eventsError ? <EmptyState icon="alert-circle-outline" title="Events Unavailable" message={eventsError} /> : featuredEvent && (
             <>
               <View style={styles.sectionHeader}>
                 <ThemedText style={styles.sectionTitle}>Upcoming Event</ThemedText>
@@ -389,6 +470,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  unavailableText: { color: '#92400E', fontSize: 12, marginBottom: 6 },
   metricsGrid: {
     flexDirection: 'row',
     gap: 10,

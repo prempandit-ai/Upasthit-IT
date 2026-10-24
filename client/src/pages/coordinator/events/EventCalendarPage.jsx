@@ -15,20 +15,29 @@ import {
 
 const EventCalendarPage = () => {
   const navigate = useNavigate();
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [events, setEvents] = useState([]);
-  const [currentDate, setCurrentDate] = useState(new Date(2025, 4, 1)); // May 2025 default to match sample data
-  const [selectedDateStr, setSelectedDateStr] = useState('2025-05-25');
+  const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedDateStr, setSelectedDateStr] = useState(todayKey);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     loadEvents();
   }, []);
 
   const loadEvents = async () => {
+    setLoadError('');
+    setLoading(true);
     try {
       const data = await getEvents();
       setEvents(data);
     } catch (err) {
       console.error(err);
+      setLoadError(err?.response?.data?.message || err?.message || 'Unable to load calendar events.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -58,7 +67,12 @@ const EventCalendarPage = () => {
     daysArray.push({ dayNumber: d, dateStr });
   }
 
-  const selectedDayEvents = events.filter((e) => e.startDate === selectedDateStr);
+  const eventDateKey = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+  const selectedDayEvents = events.filter((event) => eventDateKey(event.startDate) === selectedDateStr);
 
   return (
     <div className="space-y-6 pb-12">
@@ -81,9 +95,12 @@ const EventCalendarPage = () => {
         }
       />
 
+      {loadError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}<button type="button" onClick={loadEvents} className="ml-3 font-semibold underline">Retry</button></p>}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Calendar Grid (8 Cols) */}
         <div className="lg:col-span-8 rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+          {loading && <p className="text-xs text-slate-500">Loading events…</p>}
           {/* Header Month Switcher */}
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900">{monthYearStr}</h2>
@@ -131,7 +148,7 @@ const EventCalendarPage = () => {
               }
 
               const isSelected = item.dateStr === selectedDateStr;
-              const dayEvents = events.filter((e) => e.startDate === item.dateStr);
+              const dayEvents = events.filter((e) => eventDateKey(e.startDate) === item.dateStr);
 
               return (
                 <div

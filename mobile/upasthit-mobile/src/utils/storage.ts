@@ -96,8 +96,9 @@ export const decodeTokenPayload = (token: string | null) => {
   try {
     const parts = token.split('.');
     if (parts.length < 2) return null;
-    const payload = parts[1];
-    return JSON.parse(atob(payload)) as { exp?: number };
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
+    return JSON.parse(atob(paddedPayload)) as { exp?: number };
   } catch {
     return null;
   }

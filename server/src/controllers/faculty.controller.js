@@ -418,45 +418,35 @@ exports.getMyTodayClasses = async (req, res, next) => {
   try {
     const faculty = await prisma.facultyProfile.findUnique({
       where: { userId: req.user.id },
-      include: {
-        department: true,
-        subjectAssignments: {
-          include: { subject: true },
-        },
-      },
+      select: { id: true },
     });
-
     if (!faculty) {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
-
-    const times = [
-      { start: "10:00 AM", end: "11:00 AM" },
-      { start: "11:30 AM", end: "01:00 PM" },
-      { start: "02:00 PM", end: "03:00 PM" },
-      { start: "03:15 PM", end: "04:15 PM" },
-    ];
-    const rooms = ["LH-301", "Lab 2", "LH-302", "LH-305"];
-    const statuses = ["UPCOMING", "PENDING", "COMPLETED", "UPCOMING"];
-
-    const classes = (faculty.subjectAssignments || []).map((assignment, idx) => {
-      const sub = assignment.subject;
-      const t = times[idx] || { start: "10:00 AM", end: "11:00 AM" };
+    const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
+    const entries = await prisma.timetableEntry.findMany({
+      where: { facultyId: faculty.id, dayOfWeek },
+      include: { subject: true }, orderBy: { startTime: "asc" },
+    });
+    const now = new Date().toTimeString().slice(0, 5);
+    const classes = entries.map((entry) => {
+      const status = now < entry.startTime ? "UPCOMING" : now < entry.endTime ? "ONGOING" : "COMPLETED";
       return {
-        id: assignment.id,
-        subject: `${sub.subjectCode} - ${sub.subjectName}`,
-        subjectCode: sub.subjectCode,
-        startTime: t.start,
-        endTime: t.end,
-        className: `${sub.departmentCode || faculty.department?.code || "IT"} Engineering`,
-        semester: `Semester ${sub.semester}`,
-        division: `Division ${assignment.division || "A"}`,
-        room: rooms[idx] || (sub.subjectType === "PRACTICAL" ? "Lab 2" : "LH-301"),
-        attendanceStatus: statuses[idx] || "UPCOMING",
-        academicYear: assignment.academicYear,
+        id: entry.id,
+        subject: `${entry.subject.subjectCode} - ${entry.subject.subjectName}`,
+        subjectCode: entry.subject.subjectCode,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        className: `${entry.subject.departmentCode} Engineering`,
+        semester: `Semester ${entry.semester}`,
+        division: `Division ${entry.division}`,
+        room: entry.room,
+        type: entry.sessionType,
+        labBatch: entry.labBatch,
+        attendanceStatus: status,
+        academicYear: entry.academicYear,
       };
     });
-
     return res.json({ success: true, classes });
   } catch (error) {
     next(error);
@@ -468,36 +458,32 @@ exports.getMyTodaySchedule = async (req, res, next) => {
   try {
     const faculty = await prisma.facultyProfile.findUnique({
       where: { userId: req.user.id },
-      include: {
-        subjectAssignments: {
-          include: { subject: true },
-        },
-      },
+      select: { id: true },
     });
-
     if (!faculty) {
       return res.status(404).json({ success: false, message: "Faculty profile not found" });
     }
-
-    const times = [
-      { start: "10:00 AM", end: "11:00 AM" },
-      { start: "11:30 AM", end: "01:00 PM" },
-      { start: "02:00 PM", end: "03:00 PM" },
-    ];
-
-    const schedule = (faculty.subjectAssignments || []).map((assignment, idx) => {
-      const sub = assignment.subject;
-      const t = times[idx] || { start: "10:00 AM", end: "11:00 AM" };
+    const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
+    const entries = await prisma.timetableEntry.findMany({
+      where: { facultyId: faculty.id, dayOfWeek },
+      include: { subject: true }, orderBy: { startTime: "asc" },
+    });
+    const schedule = entries.map((entry) => {
+      const now = new Date().toTimeString().slice(0, 5);
       return {
-        startTime: t.start,
-        endTime: t.end,
-        subject: sub.subjectName,
-        classGroup: `${sub.year || "TY"} Div ${assignment.division || "A"} (Sem ${sub.semester})`,
-        room: sub.subjectType === "PRACTICAL" ? "Lab 2" : "LH-301",
-        status: idx === 0 ? "Upcoming" : "Upcoming",
+        id: entry.id,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        subject: entry.subject.subjectName,
+        subjectCode: entry.subject.subjectCode,
+        classGroup: `${entry.year} Div ${entry.division} (Sem ${entry.semester})${entry.labBatch ? ` · ${entry.labBatch}` : ""}`,
+        room: entry.room,
+        sessionType: entry.sessionType,
+        labBatch: entry.labBatch,
+        academicYear: entry.academicYear,
+        status: now < entry.startTime ? "Upcoming" : now < entry.endTime ? "Ongoing" : "Completed",
       };
     });
-
     return res.json({ success: true, schedule });
   } catch (error) {
     next(error);
@@ -507,22 +493,11 @@ exports.getMyTodaySchedule = async (req, res, next) => {
 // ─── Get Current Authenticated Faculty Notifications ─────────────────────────
 exports.getMyNotifications = async (req, res, next) => {
   try {
-    const notifications = [
-      {
-        id: "notif-1",
-        title: "Mid-Term Exam Evaluation Schedule",
-        body: "All department faculty must submit mid-term evaluation rubrics by Friday.",
-        createdAt: "2 hours ago",
-        unread: true,
-      },
-      {
-        id: "notif-2",
-        title: "Department Meeting Notice",
-        body: "HOD convened an academic audit meeting for upcoming NBA accreditation.",
-        createdAt: "Yesterday",
-        unread: false,
-      },
-    ];
+    const records = await prisma.studentNotification.findMany({ where: { recipientId: req.user.id }, orderBy: { createdAt: "desc" }, take: 100 });
+    const notifications = records.map((record) => ({
+      id: record.id, title: record.title, body: record.body,
+      createdAt: record.createdAt, unread: record.readAt === null,
+    }));
     return res.json({ success: true, notifications });
   } catch (error) {
     next(error);
